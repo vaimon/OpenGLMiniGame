@@ -21,9 +21,6 @@
 glm::mat4 viewMatrix;
 glm::mat4 projectionMatrix;
 
-GLint unifProjection;
-GLint unifView;
-
 struct ShaderInformation {
     // Переменные с индентификаторами ID
     // ID шейдерной программы
@@ -38,6 +35,9 @@ struct ShaderInformation {
     GLint unifTexture;
     // ID юниформа сдвига
     GLint unifShift;
+    GLint unifProjection;
+    GLint unifView;
+    GLint unifModel;
 };
 
 struct GameObject {
@@ -46,30 +46,27 @@ struct GameObject {
     // ID буфера вершин
     GLuint vertexVAO;
     // ID текстуры
-    GLuint textureHandle;
+    sf::Texture textureData;
+    //Модельная матрица для объекта (сюда пихаем все сдвиги и тд и тп)
+    glm::mat4 modelMatrix;
     // Величина сдвига
     GLfloat shift[3];
 };
 
-sf::Texture textureData;
 std::vector <GameObject> gameObjects;
+std::vector <GameObject> road;
+
 ShaderInformation shaderInformation;
+glm::mat4 identityMatrix = glm::mat4(1.0f);
 // Массив VBO что бы их потом удалить
 std::vector <GLuint> VBOArray;
 
-int numberOfSquares = 3;
-
-// Вершина
-struct Vertex
-{
-    GLfloat x;
-    GLfloat y;
-};
 
 const char* VertexShaderSource = TO_STRING(
     #version 330 core\n
 
     uniform vec3 shift;
+    uniform mat4 modelMatrix;
     uniform mat4 viewMatrix;
     uniform mat4 projectionMatrix;
 
@@ -83,18 +80,10 @@ const char* VertexShaderSource = TO_STRING(
     void main() {
         float x_angle = -0.5;
         float y_angle = 0.5;
-        vec3 position = vertexPosition * mat3(
-            1, 0, 0,
-            0, cos(x_angle), -sin(x_angle),
-            0, sin(x_angle), cos(x_angle)
-        ) * mat3(
-            cos(y_angle), 0, sin(y_angle),
-            0, 1, 0,
-            -sin(y_angle), 0, cos(y_angle)
-        );
+        
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
         vNormale = vertexNormale;
-        gl_Position = projectionMatrix * viewMatrix * vec4(position + shift, 1.0);
+        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(vertexPosition + shift, 1.0);
     }
 );
 
@@ -131,6 +120,7 @@ int main() {
 
     Init();
     glEnable(GL_DEPTH_TEST);
+    glClearColor(0.0f,0.749f,1.0f, 1.0f);
     // Счётчик кадров
     int tickCounter = 0;
     while (window.isOpen()) {
@@ -146,8 +136,11 @@ int main() {
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        //GameTick(tickCounter);
+        GameTick(tickCounter);
         // Отрисовываем все объекты сцены
+        for (GameObject& object : road)
+            Draw(object);
+
         for (GameObject& object: gameObjects)
             Draw(object);
 
@@ -269,11 +262,20 @@ void ShaderLog(unsigned int shader)
     }
 }
 
+void loadTexture(sf::Texture& textureData, const char* filename)
+{
+    if (!textureData.loadFromFile(filename))
+    {
+        std::cout << "could not load texture" << std::endl;
+    }
+}
 
-void initRoad() {
+void initBus() {
     GLuint VAO;
     GLuint VBO;
     auto vertices = parseFile(".\\objects\\bus2.obj");
+    sf::Texture textureData;
+    loadTexture(textureData, ".\\objects\\bus2.png");
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -306,14 +308,63 @@ void initRoad() {
     gameObjects.push_back(GameObject{
                 vertices.size(),
                 VAO,
-                textureData.getNativeHandle(),
+                textureData,
+                glm::mat4(1.0f),
                 {0, 0, 0} });
         
 }
 
+void initRoadPiece(glm::mat4 modelMatrix) {
+    GLuint VAO;
+    GLuint VBO;
+    auto vertices = parseFile(".\\objects\\road.obj");
+    sf::Texture textureData;
+    loadTexture(textureData, ".\\objects\\road.png");
+
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+
+    VBOArray.push_back(VAO);
+    VBOArray.push_back(VBO);
+
+    glBindVertexArray(VAO);
+
+    glEnableVertexAttribArray(shaderInformation.attribVertex);
+    glEnableVertexAttribArray(shaderInformation.attribNormale);
+    glEnableVertexAttribArray(shaderInformation.attribTexture);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW);
+
+    // Атрибут с координатами
+    glVertexAttribPointer(shaderInformation.attribVertex, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)0);
+    // Атрибут с цветом
+    glVertexAttribPointer(shaderInformation.attribNormale, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
+    // Атрибут с текстурой
+    glVertexAttribPointer(shaderInformation.attribTexture, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(6 * sizeof(GLfloat)));
+
+    glBindVertexArray(0);
+    glDisableVertexAttribArray(shaderInformation.attribVertex);
+    glDisableVertexAttribArray(shaderInformation.attribNormale);
+    glDisableVertexAttribArray(shaderInformation.attribTexture);
+    checkOpenGLerror();
+
+    road.push_back(GameObject{
+                vertices.size(),
+                VAO,
+                textureData,
+                modelMatrix,
+                {0, 0, 0} });
+
+}
+
 void InitObjects()
 {
-    initRoad();
+    //glm::mat4 identity = glm::mat4(1.0f);
+    //initBus();
+    initRoadPiece(glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f)));
+    initRoadPiece(glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -250.0f)));
+    initRoadPiece(glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -450.0f)));
 }
 
 
@@ -381,16 +432,23 @@ void InitShader() {
         std::cout << "could not bind uniform shift" << std::endl;
         return;
     }
+
+    shaderInformation.unifModel = glGetUniformLocation(shaderInformation.shaderProgram, "modelMatrix");
+    if (shaderInformation.unifModel == -1)
+    {
+        std::cout << "could not bind uniform view" << std::endl;
+        return;
+    }
     
-    unifView = glGetUniformLocation(shaderInformation.shaderProgram, "viewMatrix");
-    if (unifView == -1)
+    shaderInformation.unifView = glGetUniformLocation(shaderInformation.shaderProgram, "viewMatrix");
+    if (shaderInformation.unifView == -1)
     {
         std::cout << "could not bind uniform view" << std::endl;
         return;
     }
 
-    unifProjection = glGetUniformLocation(shaderInformation.shaderProgram, "projectionMatrix");
-    if (unifProjection == -1)
+    shaderInformation.unifProjection = glGetUniformLocation(shaderInformation.shaderProgram, "projectionMatrix");
+    if (shaderInformation.unifProjection == -1)
     {
         std::cout << "could not bind uniform projection" << std::endl;
         return;
@@ -399,26 +457,15 @@ void InitShader() {
     checkOpenGLerror();
 }
 
-
-void InitTexture()
-{
-    const char* filename = ".\\objects\\bus2.png";
-    if (!textureData.loadFromFile(filename))
-    {
-        std::cout << "could not load texture" << std::endl;
-    }
-}
-
 void initCamera() {
     viewMatrix = glm::mat4(1.0f);
     projectionMatrix = glm::mat4(1.0f);
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -20.0f));
-    projectionMatrix = glm::perspective(45.0f, (GLfloat)800.0f / (GLfloat)600.0f, 0.1f, 100.0f);
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, -15.0f, -50.0f));
+    projectionMatrix = glm::perspective(45.0f, (GLfloat)800.0f / (GLfloat)600.0f, 0.1f, 300.0f);
 }
 
 void Init() {
     InitShader();
-    InitTexture();
     InitObjects();
     initCamera();
 }
@@ -427,19 +474,21 @@ void Init() {
 // Обработка шага игрового цикла
 void GameTick(int tick) {
     int frequency = 100;
-    for (int i = 0; i < numberOfSquares; ++i)
-        gameObjects[i].shift[1] = 1.5f - ((tick + (frequency * i)) % (numberOfSquares * frequency)) / (float)frequency;
+    for (int i = 0; i < road.size(); ++i)
+        road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f + i * 200.0f));
+        //road[i].modelMatrix = 1.5f - ((tick + (frequency * i)) % (gameObjects.size() * frequency)) / (float)frequency;
 }
 
 
 void Draw(GameObject gameObject) {
     glUseProgram(shaderInformation.shaderProgram);
     glUniform3fv(shaderInformation.unifShift, 1, gameObject.shift);
-    glUniformMatrix4fv(unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
-    glUniformMatrix4fv(unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+    glUniformMatrix4fv(shaderInformation.unifModel, 1, GL_FALSE, glm::value_ptr(gameObject.modelMatrix));
+    glUniformMatrix4fv(shaderInformation.unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
+    glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
 
     glActiveTexture(GL_TEXTURE0);
-    sf::Texture::bind(&textureData);
+    sf::Texture::bind(&gameObject.textureData);
     glUniform1i(shaderInformation.unifTexture, 0);
 
     // Привязываем вао
