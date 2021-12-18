@@ -470,12 +470,11 @@ void Init() {
     initCamera();
 }
 
-
 // Обработка шага игрового цикла
 void GameTick(int tick) {
-    int frequency = 100;
-    for (int i = 0; i < road.size(); ++i)
-        road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f + i * 200.0f));
+    for (int i = 0; i < road.size(); ++i) {
+        road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
+    }
         //road[i].modelMatrix = 1.5f - ((tick + (frequency * i)) % (gameObjects.size() * frequency)) / (float)frequency;
 }
 
