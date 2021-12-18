@@ -4,15 +4,25 @@
 #include <SFML/OpenGL.hpp>
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 
 // В C и C++ есть оператор #, который позволяет превращать параметры макроса в строку
 #define TO_STRING(x) #x
 
+glm::mat4 viewMatrix;
+glm::mat4 projectionMatrix;
 
+GLint unifProjection;
+GLint unifView;
 
 struct ShaderInformation {
     // Переменные с индентификаторами ID
@@ -22,6 +32,8 @@ struct ShaderInformation {
     GLint attribVertex;
     // ID атрибута текстурных координат
     GLint attribTexture;
+
+    GLint attribNormale;
     // ID юниформа текстуры
     GLint unifTexture;
     // ID юниформа сдвига
@@ -30,18 +42,14 @@ struct ShaderInformation {
 
 struct GameObject {
     // Количество вершин в буферах
-    GLfloat buffers_size;
+    GLuint buffer_size;
     // ID буфера вершин
-    GLuint vertexVBO;
-    // ID буфера текстурных координат
-    GLuint textureVBO;
+    GLuint vertexVAO;
     // ID текстуры
     GLuint textureHandle;
-
-    // Велечина сдвига
-    GLfloat shift[2];
+    // Величина сдвига
+    GLfloat shift[3];
 };
-
 
 sf::Texture textureData;
 std::vector <GameObject> gameObjects;
@@ -58,20 +66,35 @@ struct Vertex
     GLfloat y;
 };
 
-
 const char* VertexShaderSource = TO_STRING(
     #version 330 core\n
 
-    uniform vec2 shift;
+    uniform vec3 shift;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
 
-    in vec2 vertCoord;
-    in vec2 texureCoord;
+    in vec3 vertexPosition;
+    in vec3 vertexNormale;
+    in vec2 vertexTextureCoords;
 
-    out vec2 tCoord;
+    out vec2 vTextureCoordinate;
+    out vec3 vNormale;
 
     void main() {
-        tCoord = texureCoord;
-        gl_Position = vec4(vertCoord + shift, 0.0, 1.0);
+        float x_angle = -0.5;
+        float y_angle = 0.5;
+        vec3 position = vertexPosition * mat3(
+            1, 0, 0,
+            0, cos(x_angle), -sin(x_angle),
+            0, sin(x_angle), cos(x_angle)
+        ) * mat3(
+            cos(y_angle), 0, sin(y_angle),
+            0, 1, 0,
+            -sin(y_angle), 0, cos(y_angle)
+        );
+        vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
+        vNormale = vertexNormale;
+        gl_Position = projectionMatrix * viewMatrix * vec4(position + shift, 1.0);
     }
 );
 
@@ -79,11 +102,15 @@ const char* FragShaderSource = TO_STRING(
     #version 330 core\n
 
     uniform sampler2D textureData;
-    in vec2 tCoord;
+
+    in vec2 vTextureCoordinate;
+    in vec3 vNormale;
+
     out vec4 color;
 
     void main() {
-        color = texture(textureData, tCoord);
+        color = texture(textureData, vTextureCoordinate) + ((vec4(vNormale, 1.0) + vec4(vTextureCoordinate * 0.0001, 0.0, 0.0)) * 0.001);
+        //color = vec4(vNormale, 1.0) + vec4(vTextureCoordinate * 0.0001, 0.0, 0.0);
     }
 );
 
@@ -95,7 +122,7 @@ void Release();
 
 
 int main() {
-    sf::Window window(sf::VideoMode(600, 600), "Ride of the Metallica", sf::Style::Default, sf::ContextSettings(24));
+    sf::Window window(sf::VideoMode(800, 600), "Merry Christmas, Oleg!!", sf::Style::Default, sf::ContextSettings(24));
     window.setVerticalSyncEnabled(true);
 
     window.setActive(true);
@@ -103,7 +130,7 @@ int main() {
     glewInit();
 
     Init();
-
+    glEnable(GL_DEPTH_TEST);
     // Счётчик кадров
     int tickCounter = 0;
     while (window.isOpen()) {
@@ -119,7 +146,7 @@ int main() {
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        GameTick(tickCounter);
+        //GameTick(tickCounter);
         // Отрисовываем все объекты сцены
         for (GameObject& object: gameObjects)
             Draw(object);
@@ -132,6 +159,85 @@ int main() {
     return 0;
 }
 
+std::vector<std::string> split(const std::string& s, char delim) {
+    std::stringstream ss(s);
+    std::string item;
+    std::vector<std::string> elems;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+        // elems.push_back(std::move(item)); // if C++11 (based on comment from @mchiasson)
+    }
+    return elems;
+}
+
+std::vector<GLfloat> parseFile(std::string fileName) {
+    std::vector<GLfloat> vertices{};
+    std::ifstream obj(fileName);
+
+    if (!obj.is_open()) {
+        throw std::exception("File cannot be opened");
+    }
+
+    std::vector<std::vector<float>> v{};
+    std::vector<std::vector<float>> vt{};
+    std::vector<std::vector<float>> vn{};
+
+    std::vector <std::string> indexAccordance{};
+    std::string line;
+    while (std::getline(obj, line))
+    {
+        std::istringstream iss(line);
+        std::string type;
+        iss >> type;
+        if (type == "v") {
+            auto vertex = split(line, ' ');
+            std::vector<float> cv{};
+            for (size_t j = 1; j < vertex.size(); j++)
+            {
+                cv.push_back(std::stof(vertex[j]));
+            }
+            v.push_back(cv);
+        }
+        else if (type == "vn") {
+            auto normale = split(line, ' ');
+            std::vector<float> cvn{};
+            for (size_t j = 1; j < normale.size(); j++)
+            {
+                cvn.push_back(std::stof(normale[j]));
+            }
+            vn.push_back(cvn);
+        }
+        else if (type == "vt") {
+            auto texture = split(line, ' ');
+            std::vector<float> cvt{};
+            for (size_t j = 1; j < texture.size(); j++)
+            {
+                cvt.push_back(std::stof(texture[j]));
+            }
+            vt.push_back(cvt);
+        }
+        else if (type == "f") {
+            auto splitted = split(line, ' ');
+            for (size_t i = 1; i < splitted.size(); i++)
+            {
+                auto triplet = split(splitted[i], '/');
+                int positionIndex = std::stoi(triplet[0]) - 1;
+                for (int j = 0; j < 3; j++) {
+                    vertices.push_back(v[positionIndex][j]);
+                }
+                int normaleIndex = std::stoi(triplet[2]) - 1;
+                for (int j = 0; j < 3; j++) {
+                    vertices.push_back(vn[normaleIndex][j]);
+                }
+                int textureIndex = std::stoi(triplet[1]) - 1;
+                for (int j = 0; j < 2; j++) {
+                    vertices.push_back(vt[textureIndex][j]);
+                }
+            }
+        }
+    }
+    return vertices;
+}
 
 // Проверка ошибок OpenGL, если есть то вывод в консоль тип ошибки
 void checkOpenGLerror() {
@@ -164,51 +270,50 @@ void ShaderLog(unsigned int shader)
 }
 
 
-void InitObjects()
-{
-    GLuint vertexVBO;
-    GLuint textureVBO;
-    glGenBuffers(1, &vertexVBO);
-    glGenBuffers(1, &textureVBO);
-    VBOArray.push_back(vertexVBO);
-    VBOArray.push_back(textureVBO);
+void initRoad() {
+    GLuint VAO;
+    GLuint VBO;
+    auto vertices = parseFile(".\\objects\\bus2.obj");
 
-    // Объявляем вершины треугольника
-    Vertex triangle[] = {
-        { -0.5f, -0.5f },
-        { +0.5f, -0.5f },
-        { +0.5f, +0.5f },
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
 
-        { +0.5f, +0.5f },
-        { -0.5f, +0.5f },
-        { -0.5f, -0.5f },
-    };
+    VBOArray.push_back(VAO);
+    VBOArray.push_back(VBO);
 
-    // Объявляем текстурные координаты
-    Vertex texture[] = {
-        { 0.0f, 1.0f },
-        { 1.0f, 1.0f },
-        { 1.0f, 0.0f },
+    glBindVertexArray(VAO);
 
-        { 1.0f, 0.0f },
-        { 0.0f, 0.0f },
-        { 0.0f, 1.0f  },
-    };
+    glEnableVertexAttribArray(shaderInformation.attribVertex);
+    glEnableVertexAttribArray(shaderInformation.attribNormale);
+    glEnableVertexAttribArray(shaderInformation.attribTexture);
 
-    glBindBuffer(GL_ARRAY_BUFFER, vertexVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, textureVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(texture), texture, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW);
 
+    // Атрибут с координатами
+    glVertexAttribPointer(shaderInformation.attribVertex, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)0);
+    // Атрибут с цветом
+    glVertexAttribPointer(shaderInformation.attribNormale, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
+    // Атрибут с текстурой
+    glVertexAttribPointer(shaderInformation.attribTexture, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(6 * sizeof(GLfloat)));
+
+    glBindVertexArray(0);
+    glDisableVertexAttribArray(shaderInformation.attribVertex);
+    glDisableVertexAttribArray(shaderInformation.attribNormale);
+    glDisableVertexAttribArray(shaderInformation.attribTexture);
     checkOpenGLerror();
 
-    // Добавляем три одинаковых объект, менять им расположение мы будем потом при обработке каждого кадра
-    for (int i = 0; i < numberOfSquares; ++i)
-        gameObjects.push_back(GameObject{
-                6,  // количество вершин в каждом буфере
-                vertexVBO,
-                textureVBO,
-                textureData.getNativeHandle(), {0, 0} });
+    gameObjects.push_back(GameObject{
+                vertices.size(),
+                VAO,
+                textureData.getNativeHandle(),
+                {0, 0, 0} });
+        
+}
+
+void InitObjects()
+{
+    initRoad();
 }
 
 
@@ -239,15 +344,23 @@ void InitShader() {
     }
 
     shaderInformation.attribVertex =
-        glGetAttribLocation(shaderInformation.shaderProgram, "vertCoord");
+        glGetAttribLocation(shaderInformation.shaderProgram, "vertexPosition");
     if (shaderInformation.attribVertex == -1)
     {
         std::cout << "could not bind attrib vertCoord" << std::endl;
         return;
     }
 
+    shaderInformation.attribNormale =
+        glGetAttribLocation(shaderInformation.shaderProgram, "vertexNormale");
+    if (shaderInformation.attribNormale == -1)
+    {
+        std::cout << "could not bind attrib normale" << std::endl;
+        return;
+    }
+
     shaderInformation.attribTexture =
-        glGetAttribLocation(shaderInformation.shaderProgram, "texureCoord");
+        glGetAttribLocation(shaderInformation.shaderProgram, "vertexTextureCoords");
     if (shaderInformation.attribTexture == -1)
     {
         std::cout << "could not bind attrib texureCoord" << std::endl;
@@ -261,30 +374,53 @@ void InitShader() {
         std::cout << "could not bind uniform textureData" << std::endl;
         return;
     }
-
+    
     shaderInformation.unifShift = glGetUniformLocation(shaderInformation.shaderProgram, "shift");
     if (shaderInformation.unifShift == -1)
     {
-        std::cout << "could not bind uniform angle" << std::endl;
+        std::cout << "could not bind uniform shift" << std::endl;
         return;
     }
+    
+    unifView = glGetUniformLocation(shaderInformation.shaderProgram, "viewMatrix");
+    if (unifView == -1)
+    {
+        std::cout << "could not bind uniform view" << std::endl;
+        return;
+    }
+
+    unifProjection = glGetUniformLocation(shaderInformation.shaderProgram, "projectionMatrix");
+    if (unifProjection == -1)
+    {
+        std::cout << "could not bind uniform projection" << std::endl;
+        return;
+    }
+    
     checkOpenGLerror();
 }
 
 
 void InitTexture()
 {
-    const char* filename = "image.jpg";
+    const char* filename = ".\\objects\\bus2.png";
     if (!textureData.loadFromFile(filename))
     {
         std::cout << "could not load texture" << std::endl;
     }
 }
 
+void initCamera() {
+    viewMatrix = glm::mat4(1.0f);
+    projectionMatrix = glm::mat4(1.0f);
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -20.0f));
+    projectionMatrix = glm::perspective(45.0f, (GLfloat)800.0f / (GLfloat)600.0f, 0.1f, 100.0f);
+}
+
 void Init() {
     InitShader();
     InitTexture();
     InitObjects();
+    initCamera();
 }
 
 
@@ -298,28 +434,19 @@ void GameTick(int tick) {
 
 void Draw(GameObject gameObject) {
     glUseProgram(shaderInformation.shaderProgram);
-    glUniform2fv(shaderInformation.unifShift, 1, gameObject.shift);
+    glUniform3fv(shaderInformation.unifShift, 1, gameObject.shift);
+    glUniformMatrix4fv(unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
+    glUniformMatrix4fv(unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&textureData);
     glUniform1i(shaderInformation.unifTexture, 0);
 
-    // Подключаем VBO
-    glEnableVertexAttribArray(shaderInformation.attribVertex);
-    glBindBuffer(GL_ARRAY_BUFFER, gameObject.vertexVBO);
-    glVertexAttribPointer(shaderInformation.attribVertex, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    glEnableVertexAttribArray(shaderInformation.attribTexture);
-    glBindBuffer(GL_ARRAY_BUFFER, gameObject.textureVBO);
-    glVertexAttribPointer(shaderInformation.attribTexture, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
+    // Привязываем вао
+    glBindVertexArray(gameObject.vertexVAO);
     // Передаем данные на видеокарту(рисуем)
-    glDrawArrays(GL_TRIANGLES, 0, gameObject.buffers_size);
-
-    // Отключаем массив атрибутов
-    glDisableVertexAttribArray(shaderInformation.attribVertex);
+    glDrawArrays(GL_TRIANGLES, 0, gameObject.buffer_size);
+    glBindVertexArray(0);
     // Отключаем шейдерную программу
     glUseProgram(0);
     checkOpenGLerror();
