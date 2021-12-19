@@ -21,22 +21,18 @@
 //================================================================================================================================
 // ========================================================= ↓СТРУКТУРЫ↓ ==========================================================
 struct ShaderInformation {
-    // Переменные с индентификаторами ID
-    // ID шейдерной программы
     GLuint shaderProgram;
-    // ID атрибута вершин
-    GLint attribVertex;
-    // ID атрибута текстурных координат
-    GLint attribTexture;
 
+    GLint attribVertex;
+    GLint attribTexture;
     GLint attribNormale;
-    // ID юниформа текстуры
+
     GLint unifTexture;
-    // ID юниформа сдвига
-    GLint unifShift;
+
     GLint unifProjection;
     GLint unifView;
     GLint unifModel;
+    GLint unifnormaleRotation;
 };
 
 struct GameObject {
@@ -48,6 +44,8 @@ struct GameObject {
     sf::Texture textureData;
     //Модельная матрица для объекта (сюда пихаем все сдвиги и тд и тп)
     glm::mat4 modelMatrix;
+    //Матрица для поворотов нормалей
+    glm::mat4 normaleRotationMatrix;
 };
 // ========================================================= ↑СТРУКТУРЫ↑ ==========================================================
 //================================================================================================================================
@@ -99,6 +97,7 @@ const char* VertexShaderSource = TO_STRING(
     uniform mat4 modelMatrix;
     uniform mat4 viewMatrix;
     uniform mat4 projectionMatrix;
+    uniform mat4 normaleRotationMatrix;
 
     in vec3 vertexPosition;
     in vec3 vertexNormale;
@@ -109,7 +108,8 @@ const char* VertexShaderSource = TO_STRING(
 
     void main() {       
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
-        vNormale = vertexNormale;
+        vec4 transNormale = normaleRotationMatrix * vec4(vertexNormale,0.0);
+        vNormale = vec3(transNormale.x, transNormale.y, transNormale.z);
         gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(vertexPosition, 1.0);
     }
 );
@@ -125,7 +125,7 @@ const char* FragShaderSource = TO_STRING(
     out vec4 color;
 
     void main() {
-        color = texture(textureData, vTextureCoordinate) + ((vec4(vNormale, 1.0) + vec4(vTextureCoordinate * 0.0001, 0.0, 0.0)) * 0.001);
+        color = texture(textureData, vTextureCoordinate) * 0.0001 + vec4(vNormale, 1.0) + vec4(vTextureCoordinate, 0.0, 0.0) * 0.0001;
         //color = vec4(vNormale, 1.0) + vec4(vTextureCoordinate * 0.0001, 0.0, 0.0);
     }
 );
@@ -244,7 +244,7 @@ void ShaderLog(unsigned int shader)
 // =========================================================== ↑ЛОГИ↑ ============================================================
 //================================================================================================================================
 // ======================================================= ↓ИНИЦИАЛИЗАЦИЯ↓ =======================================================
-GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix) {
+GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix) {
     GLuint VAO;
     GLuint VBO;
     auto vertices = parseFile(objFile);
@@ -283,21 +283,22 @@ GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 
                 vertices.size(),
                 VAO,
                 textureData,
-                modelMatrix };
+                modelMatrix,
+                normaleRotationMatrix };
 }
 
 void InitObjects()
 {
     for (int i = 0; i < 3; i++) {
-        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i))));
+        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i))));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i))));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
     }
-    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)));
+    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix);
 }
 
 
@@ -379,6 +380,13 @@ void InitShader() {
         std::cout << "could not bind uniform projection" << std::endl;
         return;
     }
+
+    shaderInformation.unifnormaleRotation = glGetUniformLocation(shaderInformation.shaderProgram, "normaleRotationMatrix");
+    if (shaderInformation.unifnormaleRotation == -1)
+    {
+        std::cout << "could not bind uniform normaleRotation" << std::endl;
+        return;
+    }
     
     checkOpenGLerror();
 }
@@ -417,7 +425,9 @@ void GameTick(int tick) {
             carYawAngle = clamp(carYawAngle - 1.0f, 0.0f, 15.0f);
         }
     }
-    car.modelMatrix = glm::translate(glm::rotate(identityMatrix, glm::radians(carYawAngle), glm::vec3(0.0f, 1.0f, 0.0f)), glm::vec3(carYawPosition, 1.0f, 0.0f));
+    auto rotation = glm::rotate(identityMatrix, glm::radians(carYawAngle), glm::vec3(0.0f, 1.0f, 0.0f));
+    car.modelMatrix = glm::translate(rotation, glm::vec3(carYawPosition, 1.0f, 0.0f));
+    car.normaleRotationMatrix = glm::transpose(glm::inverse(rotation));
 }
 
 
@@ -426,6 +436,7 @@ void Draw(GameObject gameObject) {
     glUniformMatrix4fv(shaderInformation.unifModel, 1, GL_FALSE, glm::value_ptr(gameObject.modelMatrix));
     glUniformMatrix4fv(shaderInformation.unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
     glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+    glUniformMatrix4fv(shaderInformation.unifnormaleRotation, 1, GL_FALSE, glm::value_ptr(gameObject.normaleRotationMatrix));
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&gameObject.textureData);
@@ -510,8 +521,11 @@ int main() {
             Draw(object);
 
         Draw(car);
-
-        tickCounter++;
+        int x = 1;
+        if (carYawAngle > 10) {
+           x = 1;
+        }
+        tickCounter+= x;
         window.display();
     }
 
