@@ -53,6 +53,7 @@ struct GameObject {
 
 std::vector <GameObject> gameObjects;
 std::vector <GameObject> road;
+std::vector <GameObject> grass;
 
 ShaderInformation shaderInformation;
 glm::mat4 identityMatrix = glm::mat4(1.0f);
@@ -74,10 +75,7 @@ const char* VertexShaderSource = TO_STRING(
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
 
-    void main() {
-        float x_angle = -0.5;
-        float y_angle = 0.5;
-        
+    void main() {       
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
         vNormale = vertexNormale;
         gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(vertexPosition, 1.0);
@@ -117,7 +115,7 @@ int main() {
 
     Init();
     glEnable(GL_DEPTH_TEST);
-    glClearColor(0.0f,0.749f,1.0f, 1.0f);
+    glClearColor(0.0f,0.0f,0.2f, 1.0f);
     // Счётчик кадров
     int tickCounter = 0;
     while (window.isOpen()) {
@@ -136,6 +134,9 @@ int main() {
         GameTick(tickCounter);
         // Отрисовываем все объекты сцены
         for (GameObject& object : road)
+            Draw(object);
+
+        for (GameObject& object : grass)
             Draw(object);
 
         for (GameObject& object: gameObjects)
@@ -316,6 +317,12 @@ void InitObjects()
     for (int i = 0; i < 3; i++) {
         road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i))));
     }
+    for (int i = 0; i < 3; i++) {
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i))));
+    }
+    for (int i = 0; i < 3; i++) {
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i))));
+    }
 }
 
 
@@ -416,10 +423,11 @@ void Init() {
 
 // Обработка шага игрового цикла
 void GameTick(int tick) {
-    for (int i = 0; i < road.size(); ++i) {
+    for (int i = 0; i < 3; ++i) {
         road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
+        grass[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
+        grass[i+3].modelMatrix = glm::translate(identityMatrix, glm::vec3(-110.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
     }
-        //road[i].modelMatrix = 1.5f - ((tick + (frequency * i)) % (gameObjects.size() * frequency)) / (float)frequency;
 }
 
 
