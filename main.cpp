@@ -29,10 +29,40 @@ struct ShaderInformation {
 
     GLint unifTexture;
 
+    GLint unifCameraPosition;
+
     GLint unifProjection;
     GLint unifView;
     GLint unifModel;
     GLint unifnormaleRotation;
+
+    GLint unifLightPosition;
+    GLint unifLightAmbient;
+    GLint unifLightDiffuse;
+    GLint unifLightSpecular;
+    GLint unifLightAttenuation;
+
+    GLint unifMaterialAmbient;
+    GLint unifMaterialDiffuse;
+    GLint unifMaterialSpecular;
+    GLint unifMaterialEmission;
+    GLint unifMaterialShininess;
+};
+
+struct Light {
+   glm::vec4 lightPosition;
+   glm::vec4 lightAmbient;
+   glm::vec4 lightDiffuse;
+   glm::vec4 lightSpecular;
+   glm::vec3 lightAttenuation;
+};
+
+struct Material {
+    glm::vec4 materialAmbient;
+    glm::vec4 materialDiffuse;
+    glm::vec4 materialSpecular;
+    glm::vec4 materialEmission;
+    GLfloat materialshininess;
 };
 
 struct GameObject {
@@ -46,6 +76,8 @@ struct GameObject {
     glm::mat4 modelMatrix;
     //Матрица для поворотов нормалей
     glm::mat4 normaleRotationMatrix;
+    //Всякие коэффициенты для материала
+    Material material;
 };
 // ========================================================= ↑СТРУКТУРЫ↑ ==========================================================
 //================================================================================================================================
@@ -53,6 +85,10 @@ struct GameObject {
 GameObject car;
 std::vector <GameObject> road;
 std::vector <GameObject> grass;
+
+Light light;
+
+glm::vec3 cameraPosition = glm::vec3(0.0f, -15.0f, -35.0f);
 
 int carYawState = 0;
 float carYawAngle = 0.0f;
@@ -99,34 +135,78 @@ const char* VertexShaderSource = TO_STRING(
     uniform mat4 projectionMatrix;
     uniform mat4 normaleRotationMatrix;
 
+    uniform vec3 cameraPosition;   
+    uniform vec4 lightPosition;
+
     in vec3 vertexPosition;
     in vec3 vertexNormale;
     in vec2 vertexTextureCoords;
 
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
+    out vec3 lightDirection;
+    out vec3 viewDirection;
+    out float distance;
 
-    void main() {       
+    void main() {
+        // Переведём координаты в мировые
+        vec4 worldVertexPosition = modelMatrix * vec4(vertexPosition, 1.0);
+        // Находим вектор освещения
+        vec4 lightDir = lightPosition - worldVertexPosition;
+        // Пробрасываем текстурные
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
+        // Преобразуем и пробрасываем нормаль
         vec4 transNormale = normaleRotationMatrix * vec4(vertexNormale,0.0);
-        vNormale = vec3(transNormale.x, transNormale.y, transNormale.z);
-        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(vertexPosition, 1.0);
+        vNormale = normalize(vec3(transNormale));
+        // Задаём позишн
+        gl_Position = projectionMatrix * viewMatrix * worldVertexPosition;
+        // Пробрасываем направление на свет
+        lightDirection = normalize(vec3(lightDir));
+        // Пробрасываем вектор в глаз
+        viewDirection = normalize(cameraPosition - vec3(worldVertexPosition));
+        distance = length(lightDir);
     }
 );
 
 const char* FragShaderSource = TO_STRING(
     #version 330 core\n
 
+    uniform vec4 lightAmbient;
+    uniform vec4 lightDiffuse;
+    uniform vec4 lightSpecular;
+    uniform vec3 lightAttenuation;
+
     uniform sampler2D textureData;
+    uniform vec4 materialAmbient;
+    uniform vec4 materialDiffuse;
+    uniform vec4 materialSpecular;
+    uniform vec4 materialEmission;
+    uniform float materialShininess;
 
     in vec2 vTextureCoordinate;
     in vec3 vNormale;
+    in vec3 lightDirection;
+    in vec3 viewDirection;
+    in float distance;
 
     out vec4 color;
 
     void main() {
-        color = texture(textureData, vTextureCoordinate) * 0.0001 + vec4(vNormale, 1.0) + vec4(vTextureCoordinate, 0.0, 0.0) * 0.0001;
-        //color = vec4(vNormale, 1.0) + vec4(vTextureCoordinate * 0.0001, 0.0, 0.0);
+        // Считаем затухание
+        float attenuation = 1.0 / (lightAttenuation[0] + lightAttenuation[1] * distance + lightAttenuation[2] * distance * distance);
+        // Собственное свечение объекта
+        color = materialEmission;
+        // Вкладываем эмбиент
+        color += materialAmbient * lightAmbient * attenuation;
+        // Считаем диффузное освещение через скаляр векторов
+        float lightAngle = max(dot(vNormale, lightDirection), 0.0);
+        color += materialDiffuse * lightDiffuse * lightAngle * attenuation;
+        // Считаем блики той самой формулой
+        float specularAngle = max(pow(dot(reflect(-lightDirection, vNormale), viewDirection), materialShininess), 0.0);
+        color += materialSpecular * lightSpecular * specularAngle * attenuation;
+        // Смешиваем полученное с текстурой
+        color *= texture(textureData, vTextureCoordinate);
+        //color = texture(textureData, vTextureCoordinate)  + vec4(vNormale, 1.0) * 0.0001;
     }
 );
 
@@ -244,7 +324,7 @@ void ShaderLog(unsigned int shader)
 // =========================================================== ↑ЛОГИ↑ ============================================================
 //================================================================================================================================
 // ======================================================= ↓ИНИЦИАЛИЗАЦИЯ↓ =======================================================
-GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix) {
+GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material) {
     GLuint VAO;
     GLuint VBO;
     auto vertices = parseFile(objFile);
@@ -284,21 +364,31 @@ GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 
                 VAO,
                 textureData,
                 modelMatrix,
-                normaleRotationMatrix };
+                normaleRotationMatrix,
+                material
+    };
 }
 
 void InitObjects()
 {
+    Material basic = Material{
+    glm::vec4(0.5,0.5,0.5,1.0),
+    glm::vec4(0.8,0.8,0.8,1.0),
+    glm::vec4(0.5,0.5,0.5,1.0),
+    glm::vec4(0.0,0.0,0.0,1.0),
+    225.0f,
+    };
+
     for (int i = 0; i < 3; i++) {
-        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
+        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
     }
-    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix);
+    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, basic);
 }
 
 
@@ -387,21 +477,109 @@ void InitShader() {
         std::cout << "could not bind uniform normaleRotation" << std::endl;
         return;
     }
+
+    shaderInformation.unifCameraPosition = glGetUniformLocation(shaderInformation.shaderProgram, "cameraPosition");
+    if (shaderInformation.unifCameraPosition == -1)
+    {
+        std::cout << "could not bind uniform unifCameraPosition" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifLightAmbient = glGetUniformLocation(shaderInformation.shaderProgram, "lightAmbient");
+    if (shaderInformation.unifLightAmbient == -1)
+    {
+        std::cout << "could not bind uniform unifLightAmbient" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifLightAttenuation = glGetUniformLocation(shaderInformation.shaderProgram, "lightAttenuation");
+    if (shaderInformation.unifLightAttenuation == -1)
+    {
+        std::cout << "could not bind uniform unifLightAttenuation" << std::endl;
+        return;
+    }
     
+    shaderInformation.unifLightDiffuse = glGetUniformLocation(shaderInformation.shaderProgram, "lightDiffuse");
+    if (shaderInformation.unifLightDiffuse == -1)
+    {
+        std::cout << "could not bind uniform unifLightDiffuse" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifLightPosition = glGetUniformLocation(shaderInformation.shaderProgram, "lightPosition");
+    if (shaderInformation.unifLightPosition == -1)
+    {
+        std::cout << "could not bind uniform unifLightPosition" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifLightSpecular = glGetUniformLocation(shaderInformation.shaderProgram, "lightSpecular");
+    if (shaderInformation.unifLightSpecular == -1)
+    {
+        std::cout << "could not bind uniform unifLightSpecular" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifMaterialAmbient = glGetUniformLocation(shaderInformation.shaderProgram, "materialAmbient");
+    if (shaderInformation.unifMaterialAmbient == -1)
+    {
+        std::cout << "could not bind uniform unifMaterialAmbient" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifMaterialDiffuse = glGetUniformLocation(shaderInformation.shaderProgram, "materialDiffuse");
+    if (shaderInformation.unifMaterialDiffuse == -1)
+    {
+        std::cout << "could not bind uniform unifMaterialDiffuse" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifMaterialEmission = glGetUniformLocation(shaderInformation.shaderProgram, "materialEmission");
+    if (shaderInformation.unifMaterialEmission == -1)
+    {
+        std::cout << "could not bind uniform unifMaterialEmission" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifMaterialShininess = glGetUniformLocation(shaderInformation.shaderProgram, "materialShininess");
+    if (shaderInformation.unifMaterialShininess == -1)
+    {
+        std::cout << "could not bind uniform materialShininess" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifMaterialSpecular = glGetUniformLocation(shaderInformation.shaderProgram, "materialSpecular");
+    if (shaderInformation.unifMaterialSpecular == -1)
+    {
+        std::cout << "could not bind uniform unifMaterialSpecular" << std::endl;
+        return;
+    }
+
     checkOpenGLerror();
 }
 
 void initCamera() {
     viewMatrix = glm::mat4(1.0f);
     projectionMatrix = glm::mat4(1.0f);
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, -15.0f, -35.0f));
+    viewMatrix = glm::translate(viewMatrix, cameraPosition);
     projectionMatrix = glm::perspective(45.0f, (GLfloat)800.0f / (GLfloat)600.0f, 0.1f, 300.0f);
+}
+
+void initLight() {
+    light = Light{ 
+        glm::vec4(0.0,50.0,0.0,0.0),
+        glm::vec4(1.0, 1.0, 1.0, 1.0),
+        glm::vec4(1.0, 1.0, 1.0, 1.0),
+        glm::vec4(1.0, 1.0, 1.0, 1.0),
+        glm::vec3(1.0, 0.0, 0.0)
+    };
 }
 
 void Init() {
     InitShader();
     InitObjects();
     initCamera();
+    initLight();
 }
 // ======================================================= ↑ИНИЦИАЛИЗАЦИЯ↑ =======================================================
 //================================================================================================================================
@@ -437,6 +615,18 @@ void Draw(GameObject gameObject) {
     glUniformMatrix4fv(shaderInformation.unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
     glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
     glUniformMatrix4fv(shaderInformation.unifnormaleRotation, 1, GL_FALSE, glm::value_ptr(gameObject.normaleRotationMatrix));
+    glUniform3fv(shaderInformation.unifCameraPosition, 1, glm::value_ptr(cameraPosition));
+    glUniform3fv(shaderInformation.unifLightAttenuation, 1, glm::value_ptr(light.lightAttenuation));
+    glUniform4fv(shaderInformation.unifLightAmbient, 1, glm::value_ptr(light.lightAmbient));
+    glUniform4fv(shaderInformation.unifLightDiffuse, 1, glm::value_ptr(light.lightDiffuse));
+    glUniform4fv(shaderInformation.unifLightPosition, 1, glm::value_ptr(light.lightPosition));
+    glUniform4fv(shaderInformation.unifLightSpecular, 1, glm::value_ptr(light.lightSpecular));
+    glUniform1f(shaderInformation.unifMaterialShininess, gameObject.material.materialshininess);
+    glUniform4fv(shaderInformation.unifMaterialAmbient, 1, glm::value_ptr(gameObject.material.materialAmbient));
+    glUniform4fv(shaderInformation.unifMaterialDiffuse, 1, glm::value_ptr(gameObject.material.materialDiffuse));
+    glUniform4fv(shaderInformation.unifMaterialEmission, 1, glm::value_ptr(gameObject.material.materialEmission));
+    glUniform4fv(shaderInformation.unifMaterialSpecular, 1, glm::value_ptr(gameObject.material.materialSpecular));
+    
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&gameObject.textureData);
