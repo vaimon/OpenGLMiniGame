@@ -123,6 +123,11 @@ float clamp(float num, float left, float right) {
     }
     return num;
 }
+
+void moveLightDirection(float x, float y, float z) {
+    light.lightDirection = glm::vec3(clamp(light.lightDirection.x + x, -1.0f, 1.0f), clamp(light.lightDirection.y + y, 0.0f, 1.0f), clamp(light.lightDirection.z + z, -1.0f, 1.0f));
+    std::cout << "Light direction: (" << light.lightDirection.x << ", " << light.lightDirection.y << ", " << light.lightDirection.z << ")" << std::endl;
+}
 // ================================================= ↑ВСПОМОГАТЕЛЬНЫЕ ПРИКОЛЮХИ↑ =================================================
 //================================================================================================================================
 // ========================================================= ↓ШЕЙДЕРЫ↓ ===========================================================
@@ -358,24 +363,40 @@ GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 
 
 void InitObjects()
 {
-    Material basic = Material{
-    glm::vec4(0.5,0.5,0.5,1.0),
+    Material carMaterial = Material{
+    glm::vec4(0.2,0.2,0.2,1.0),     //Ambient
+    glm::vec4(0.8,0.8,0.8,1.0),     //Diffuse
+    glm::vec4(0.3,0.3,0.3,1.0),     //Specular
+    glm::vec4(0.0,0.0,0.0,1.0),     //Emission
+    10.0f,                          //shininess
+    };
+
+    Material asphaltMaterial = Material{
+    glm::vec4(0.1,0.1,0.1,1.0),
     glm::vec4(0.8,0.8,0.8,1.0),
     glm::vec4(0.5,0.5,0.5,1.0),
     glm::vec4(0.0,0.0,0.0,1.0),
-    225.0f,
+    2.0f,
+    };
+
+    Material grassMaterial = Material{
+    glm::vec4(0.1,0.1,0.1,1.0),
+    glm::vec4(0.9,0.9,0.9,1.0),
+    glm::vec4(0.1,0.1,0.1,1.0),
+    glm::vec4(0.0,0.0,0.0,1.0),
+    1.0f,
     };
 
     for (int i = 0; i < 3; i++) {
-        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
+        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, asphaltMaterial));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
     }
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, basic));
+        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
     }
-    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, basic);
+    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
 }
 
 
@@ -669,11 +690,15 @@ int main() {
             }
             else if (event.type == sf::Event::KeyPressed) {
                 switch (event.key.code) {
-                case (sf::Keyboard::A): carYawState = -1; break;
-                case (sf::Keyboard::D): carYawState = 1; break;
-                default:{
-                            break; 
-                        }
+                case (sf::Keyboard::Left): carYawState = -1; break;
+                case (sf::Keyboard::Right): carYawState = 1; break;
+                case (sf::Keyboard::W): moveLightDirection(0, 0.01f, 0); break;
+                case (sf::Keyboard::S): moveLightDirection(0, -0.01f, 0); break;
+                case (sf::Keyboard::D): moveLightDirection(0.01f, 0, 0); break;
+                case (sf::Keyboard::A): moveLightDirection(-0.01f, 0, 0); break;
+                case (sf::Keyboard::E): moveLightDirection(0, 0, 0.01f); break;
+                case (sf::Keyboard::Q): moveLightDirection(0, 0, -0.01f); break;
+                default: break; 
                 }
             }
         }
