@@ -17,10 +17,6 @@
 
 // В C и C++ есть оператор #, который позволяет превращать параметры макроса в строку
 #define TO_STRING(x) #x
-//void Init();
-//void GameTick(int tick);
-//void Draw(GameObject gameObject);
-//void Release();
 
 //================================================================================================================================
 // ========================================================= ↓СТРУКТУРЫ↓ ==========================================================
@@ -56,9 +52,13 @@ struct GameObject {
 // ========================================================= ↑СТРУКТУРЫ↑ ==========================================================
 //================================================================================================================================
 // ================================================= ↓ОБЪЯВЛЕНИЕ ВСЯКОГО РАЗНОГО↓ =================================================
-std::vector <GameObject> gameObjects;
+GameObject car;
 std::vector <GameObject> road;
 std::vector <GameObject> grass;
+
+int carYawState = 0;
+float carYawAngle = 0.0f;
+float carYawPosition = 0.0f;
 
 glm::mat4 viewMatrix;
 glm::mat4 projectionMatrix;
@@ -297,7 +297,7 @@ void InitObjects()
     for (int i = 0; i < 3; i++) {
         grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i))));
     }
-    gameObjects.push_back(createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 10.0f))));
+    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)));
 }
 
 
@@ -386,7 +386,7 @@ void InitShader() {
 void initCamera() {
     viewMatrix = glm::mat4(1.0f);
     projectionMatrix = glm::mat4(1.0f);
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, -15.0f, -50.0f));
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, -15.0f, -35.0f));
     projectionMatrix = glm::perspective(45.0f, (GLfloat)800.0f / (GLfloat)600.0f, 0.1f, 300.0f);
 }
 
@@ -405,6 +405,19 @@ void GameTick(int tick) {
         grass[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
         grass[i+3].modelMatrix = glm::translate(identityMatrix, glm::vec3(-110.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
     }
+    if (carYawState != 0) {
+        carYawAngle = clamp(carYawAngle - carYawState, -15.0f, 15.0f);
+        carYawPosition = clamp(carYawPosition + carYawState / 5.0f, -12.0f, 12.0f);
+    }
+    else {
+        if (carYawAngle < 0) {
+            carYawAngle = clamp(carYawAngle + 1.0f, -15.0f, 0.0f);
+        }
+        else {
+            carYawAngle = clamp(carYawAngle - 1.0f, 0.0f, 15.0f);
+        }
+    }
+    car.modelMatrix = glm::translate(glm::rotate(identityMatrix, glm::radians(carYawAngle), glm::vec3(0.0f, 1.0f, 0.0f)), glm::vec3(carYawPosition, 1.0f, 0.0f));
 }
 
 
@@ -472,6 +485,18 @@ int main() {
             else if (event.type == sf::Event::Resized) {
                 glViewport(0, 0, event.size.width, event.size.height);
             }
+            else if (event.type == sf::Event::KeyReleased) {
+                carYawState = 0;
+            }
+            else if (event.type == sf::Event::KeyPressed) {
+                switch (event.key.code) {
+                case (sf::Keyboard::A): carYawState = -1; break;
+                case (sf::Keyboard::D): carYawState = 1; break;
+                default:{
+                            break; 
+                        }
+                }
+            }
         }
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -484,8 +509,7 @@ int main() {
         for (GameObject& object : grass)
             Draw(object);
 
-        for (GameObject& object : gameObjects)
-            Draw(object);
+        Draw(car);
 
         tickCounter++;
         window.display();
