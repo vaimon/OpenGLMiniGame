@@ -17,10 +17,13 @@
 
 // В C и C++ есть оператор #, который позволяет превращать параметры макроса в строку
 #define TO_STRING(x) #x
+void Init();
+void GameTick(int tick);
+void Draw(GameObject gameObject);
+void Release();
 
-glm::mat4 viewMatrix;
-glm::mat4 projectionMatrix;
-
+//================================================================================================================================
+// ========================================================= ↓СТРУКТУРЫ↓ ==========================================================
 struct ShaderInformation {
     // Переменные с индентификаторами ID
     // ID шейдерной программы
@@ -50,17 +53,37 @@ struct GameObject {
     //Модельная матрица для объекта (сюда пихаем все сдвиги и тд и тп)
     glm::mat4 modelMatrix;
 };
-
+// ========================================================= ↑СТРУКТУРЫ↑ ==========================================================
+//================================================================================================================================
+// ================================================= ↓ОБЪЯВЛЕНИЕ ВСЯКОГО РАЗНОГО↓ =================================================
 std::vector <GameObject> gameObjects;
 std::vector <GameObject> road;
 std::vector <GameObject> grass;
+
+glm::mat4 viewMatrix;
+glm::mat4 projectionMatrix;
 
 ShaderInformation shaderInformation;
 glm::mat4 identityMatrix = glm::mat4(1.0f);
 // Массив VBO что бы их потом удалить
 std::vector <GLuint> VBOArray;
+// ================================================= ↑ОБЪЯВЛЕНИЕ ВСЯКОГО РАЗНОГО↑ =================================================
+//================================================================================================================================
+// ================================================= ↓ВСПОМОГАТЕЛЬНЫЕ ПРИКОЛЮХИ↓ ==================================================
+std::vector<std::string> split(const std::string& s, char delim) {
+    std::stringstream ss(s);
+    std::string item;
+    std::vector<std::string> elems;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+        // elems.push_back(std::move(item)); // if C++11 (based on comment from @mchiasson)
+    }
+    return elems;
+}
 
-
+// ================================================= ↑ВСПОМОГАТЕЛЬНЫЕ ПРИКОЛЮХИ↑ =================================================
+//================================================================================================================================
+// ========================================================= ↓ШЕЙДЕРЫ↓ ===========================================================
 const char* VertexShaderSource = TO_STRING(
     #version 330 core\n
 
@@ -98,69 +121,9 @@ const char* FragShaderSource = TO_STRING(
     }
 );
 
-
-void Init();
-void GameTick(int tick);
-void Draw(GameObject gameObject);
-void Release();
-
-
-int main() {
-    sf::Window window(sf::VideoMode(800, 600), "Merry Christmas, Oleg!!", sf::Style::Default, sf::ContextSettings(24));
-    window.setVerticalSyncEnabled(true);
-
-    window.setActive(true);
-
-    glewInit();
-
-    Init();
-    glEnable(GL_DEPTH_TEST);
-    glClearColor(0.0f,0.0f,0.2f, 1.0f);
-    // Счётчик кадров
-    int tickCounter = 0;
-    while (window.isOpen()) {
-        sf::Event event;
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) {
-                window.close();
-            }
-            else if (event.type == sf::Event::Resized) {
-                glViewport(0, 0, event.size.width, event.size.height);
-            }
-        }
-
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        GameTick(tickCounter);
-        // Отрисовываем все объекты сцены
-        for (GameObject& object : road)
-            Draw(object);
-
-        for (GameObject& object : grass)
-            Draw(object);
-
-        for (GameObject& object: gameObjects)
-            Draw(object);
-
-        tickCounter++;
-        window.display();
-    }
-
-    Release();
-    return 0;
-}
-
-std::vector<std::string> split(const std::string& s, char delim) {
-    std::stringstream ss(s);
-    std::string item;
-    std::vector<std::string> elems;
-    while (std::getline(ss, item, delim)) {
-        elems.push_back(item);
-        // elems.push_back(std::move(item)); // if C++11 (based on comment from @mchiasson)
-    }
-    return elems;
-}
-
+// ========================================================= ↑ШЕЙДЕРЫ↑ ===========================================================
+//================================================================================================================================
+// ==================================================== ↓РАБОТА С ФАЙЛАМИ↓ =======================================================
 std::vector<GLfloat> parseFile(std::string fileName) {
     std::vector<GLfloat> vertices{};
     std::ifstream obj(fileName);
@@ -230,6 +193,16 @@ std::vector<GLfloat> parseFile(std::string fileName) {
     return vertices;
 }
 
+void loadTexture(sf::Texture& textureData, const char* filename)
+{
+    if (!textureData.loadFromFile(filename))
+    {
+        std::cout << "could not load texture" << std::endl;
+    }
+}
+// ==================================================== ↑РАБОТА С ФАЙЛАМИ↑ =======================================================
+//================================================================================================================================
+// =========================================================== ↓ЛОГИ↓ ============================================================
 // Проверка ошибок OpenGL, если есть то вывод в консоль тип ошибки
 void checkOpenGLerror() {
     GLenum errCode;
@@ -259,16 +232,9 @@ void ShaderLog(unsigned int shader)
         delete[] infoLog;
     }
 }
-
-void loadTexture(sf::Texture& textureData, const char* filename)
-{
-    if (!textureData.loadFromFile(filename))
-    {
-        std::cout << "could not load texture" << std::endl;
-    }
-}
-
-
+// =========================================================== ↑ЛОГИ↑ ============================================================
+//================================================================================================================================
+// ======================================================= ↓ИНИЦИАЛИЗАЦИЯ↓ =======================================================
 GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix) {
     GLuint VAO;
     GLuint VBO;
@@ -313,7 +279,6 @@ GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 
 
 void InitObjects()
 {
-    //initBus();
     for (int i = 0; i < 3; i++) {
         road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i))));
     }
@@ -323,6 +288,7 @@ void InitObjects()
     for (int i = 0; i < 3; i++) {
         grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i))));
     }
+    gameObjects.push_back(createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 10.0f))));
 }
 
 
@@ -420,7 +386,9 @@ void Init() {
     InitObjects();
     initCamera();
 }
-
+// ======================================================= ↑ИНИЦИАЛИЗАЦИЯ↑ =======================================================
+//================================================================================================================================
+// ========================================================= ↓ОТРИСОВКА↓ =========================================================
 // Обработка шага игрового цикла
 void GameTick(int tick) {
     for (int i = 0; i < 3; ++i) {
@@ -450,8 +418,9 @@ void Draw(GameObject gameObject) {
     glUseProgram(0);
     checkOpenGLerror();
 }
-
-
+// ========================================================= ↑ОТРИСОВКА↑ =========================================================
+//================================================================================================================================
+// ========================================================== ↓ЧИСТКА↓ ===========================================================
 void ReleaseShader() {
     glUseProgram(0);
     glDeleteProgram(shaderInformation.shaderProgram);
@@ -469,3 +438,52 @@ void Release() {
     ReleaseShader();
     ReleaseVBO();
 }
+// ========================================================== ↑ЧИСТКА↑ ===========================================================
+//================================================================================================================================
+// =========================================================== ↓МЕЙН↓ ============================================================
+int main() {
+    sf::Window window(sf::VideoMode(800, 600), "Merry Christmas, Oleg!!", sf::Style::Default, sf::ContextSettings(24));
+    window.setVerticalSyncEnabled(true);
+
+    window.setActive(true);
+
+    glewInit();
+
+    Init();
+    glEnable(GL_DEPTH_TEST);
+    glClearColor(0.0f, 0.0f, 0.2f, 1.0f);
+    // Счётчик кадров
+    int tickCounter = 0;
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) {
+                window.close();
+            }
+            else if (event.type == sf::Event::Resized) {
+                glViewport(0, 0, event.size.width, event.size.height);
+            }
+        }
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        GameTick(tickCounter);
+        // Отрисовываем все объекты сцены
+        for (GameObject& object : road)
+            Draw(object);
+
+        for (GameObject& object : grass)
+            Draw(object);
+
+        for (GameObject& object : gameObjects)
+            Draw(object);
+
+        tickCounter++;
+        window.display();
+    }
+
+    Release();
+    return 0;
+}
+// =========================================================== ↑МЕЙН↑ ============================================================
+//================================================================================================================================
