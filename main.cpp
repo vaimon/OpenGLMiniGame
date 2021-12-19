@@ -36,7 +36,7 @@ struct ShaderInformation {
     GLint unifModel;
     GLint unifnormaleRotation;
 
-    GLint unifLightPosition;
+    GLint unifLightDirection;
     GLint unifLightAmbient;
     GLint unifLightDiffuse;
     GLint unifLightSpecular;
@@ -50,11 +50,10 @@ struct ShaderInformation {
 };
 
 struct Light {
-   glm::vec4 lightPosition;
+   glm::vec3 lightDirection;
    glm::vec4 lightAmbient;
    glm::vec4 lightDiffuse;
    glm::vec4 lightSpecular;
-   glm::vec3 lightAttenuation;
 };
 
 struct Material {
@@ -136,7 +135,6 @@ const char* VertexShaderSource = TO_STRING(
     uniform mat4 normaleRotationMatrix;
 
     uniform vec3 cameraPosition;   
-    uniform vec4 lightPosition;
 
     in vec3 vertexPosition;
     in vec3 vertexNormale;
@@ -144,15 +142,11 @@ const char* VertexShaderSource = TO_STRING(
 
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
-    out vec3 lightDirection;
     out vec3 viewDirection;
-    out float distance;
 
     void main() {
         // Переведём координаты в мировые
         vec4 worldVertexPosition = modelMatrix * vec4(vertexPosition, 1.0);
-        // Находим вектор освещения
-        vec4 lightDir = lightPosition - worldVertexPosition;
         // Пробрасываем текстурные
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
         // Преобразуем и пробрасываем нормаль
@@ -160,21 +154,18 @@ const char* VertexShaderSource = TO_STRING(
         vNormale = normalize(vec3(transNormale));
         // Задаём позишн
         gl_Position = projectionMatrix * viewMatrix * worldVertexPosition;
-        // Пробрасываем направление на свет
-        lightDirection = normalize(vec3(lightDir));
         // Пробрасываем вектор в глаз
         viewDirection = normalize(cameraPosition - vec3(worldVertexPosition));
-        distance = length(lightDir);
     }
 );
 
 const char* FragShaderSource = TO_STRING(
     #version 330 core\n
 
+    uniform vec3 lightDirection;
     uniform vec4 lightAmbient;
     uniform vec4 lightDiffuse;
     uniform vec4 lightSpecular;
-    uniform vec3 lightAttenuation;
 
     uniform sampler2D textureData;
     uniform vec4 materialAmbient;
@@ -185,25 +176,21 @@ const char* FragShaderSource = TO_STRING(
 
     in vec2 vTextureCoordinate;
     in vec3 vNormale;
-    in vec3 lightDirection;
     in vec3 viewDirection;
-    in float distance;
 
     out vec4 color;
 
     void main() {
-        // Считаем затухание
-        float attenuation = 1.0 / (lightAttenuation[0] + lightAttenuation[1] * distance + lightAttenuation[2] * distance * distance);
         // Собственное свечение объекта
         color = materialEmission;
         // Вкладываем эмбиент
-        color += materialAmbient * lightAmbient * attenuation;
+        color += materialAmbient * lightAmbient;
         // Считаем диффузное освещение через скаляр векторов
         float lightAngle = max(dot(vNormale, lightDirection), 0.0);
-        color += materialDiffuse * lightDiffuse * lightAngle * attenuation;
+        color += materialDiffuse * lightDiffuse * lightAngle;
         // Считаем блики той самой формулой
         float specularAngle = max(pow(dot(reflect(-lightDirection, vNormale), viewDirection), materialShininess), 0.0);
-        color += materialSpecular * lightSpecular * specularAngle * attenuation;
+        color += materialSpecular * lightSpecular * specularAngle;
         // Смешиваем полученное с текстурой
         color *= texture(textureData, vTextureCoordinate);
         //color = texture(textureData, vTextureCoordinate)  + vec4(vNormale, 1.0) * 0.0001;
@@ -491,13 +478,6 @@ void InitShader() {
         std::cout << "could not bind uniform unifLightAmbient" << std::endl;
         return;
     }
-
-    shaderInformation.unifLightAttenuation = glGetUniformLocation(shaderInformation.shaderProgram, "lightAttenuation");
-    if (shaderInformation.unifLightAttenuation == -1)
-    {
-        std::cout << "could not bind uniform unifLightAttenuation" << std::endl;
-        return;
-    }
     
     shaderInformation.unifLightDiffuse = glGetUniformLocation(shaderInformation.shaderProgram, "lightDiffuse");
     if (shaderInformation.unifLightDiffuse == -1)
@@ -506,10 +486,10 @@ void InitShader() {
         return;
     }
 
-    shaderInformation.unifLightPosition = glGetUniformLocation(shaderInformation.shaderProgram, "lightPosition");
-    if (shaderInformation.unifLightPosition == -1)
+    shaderInformation.unifLightDirection = glGetUniformLocation(shaderInformation.shaderProgram, "lightDirection");
+    if (shaderInformation.unifLightDirection == -1)
     {
-        std::cout << "could not bind uniform unifLightPosition" << std::endl;
+        std::cout << "could not bind uniform unifLightDirection" << std::endl;
         return;
     }
 
@@ -567,11 +547,10 @@ void initCamera() {
 
 void initLight() {
     light = Light{ 
-        glm::vec4(0.0,50.0,0.0,0.0),
+        glm::vec3(0.0,1.0,0.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0),
-        glm::vec4(1.0, 1.0, 1.0, 1.0),
-        glm::vec3(1.0, 0.0, 0.0)
+        glm::vec4(1.0, 1.0, 1.0, 1.0)
     };
 }
 
@@ -616,10 +595,9 @@ void Draw(GameObject gameObject) {
     glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
     glUniformMatrix4fv(shaderInformation.unifnormaleRotation, 1, GL_FALSE, glm::value_ptr(gameObject.normaleRotationMatrix));
     glUniform3fv(shaderInformation.unifCameraPosition, 1, glm::value_ptr(cameraPosition));
-    glUniform3fv(shaderInformation.unifLightAttenuation, 1, glm::value_ptr(light.lightAttenuation));
     glUniform4fv(shaderInformation.unifLightAmbient, 1, glm::value_ptr(light.lightAmbient));
     glUniform4fv(shaderInformation.unifLightDiffuse, 1, glm::value_ptr(light.lightDiffuse));
-    glUniform4fv(shaderInformation.unifLightPosition, 1, glm::value_ptr(light.lightPosition));
+    glUniform3fv(shaderInformation.unifLightDirection, 1, glm::value_ptr(light.lightDirection));
     glUniform4fv(shaderInformation.unifLightSpecular, 1, glm::value_ptr(light.lightSpecular));
     glUniform1f(shaderInformation.unifMaterialShininess, gameObject.material.materialshininess);
     glUniform4fv(shaderInformation.unifMaterialAmbient, 1, glm::value_ptr(gameObject.material.materialAmbient));
