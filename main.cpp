@@ -86,6 +86,7 @@ std::vector <GameObject> road;
 std::vector <GameObject> grass;
 
 Light light;
+bool isLightOn = true;
 
 glm::vec3 cameraPosition = glm::vec3(0.0f, -15.0f, -35.0f);
 
@@ -127,6 +128,18 @@ float clamp(float num, float left, float right) {
 void moveLightDirection(float x, float y, float z) {
     light.lightDirection = glm::vec3(clamp(light.lightDirection.x + x, -1.0f, 1.0f), clamp(light.lightDirection.y + y, 0.0f, 1.0f), clamp(light.lightDirection.z + z, -1.0f, 1.0f));
     std::cout << "Light direction: (" << light.lightDirection.x << ", " << light.lightDirection.y << ", " << light.lightDirection.z << ")" << std::endl;
+}
+
+void switchLight() {
+    isLightOn = !isLightOn;
+    if (isLightOn) {
+        light.lightDiffuse = glm::vec4(1.0, 1.0, 1.0, 1.0);
+        light.lightSpecular = glm::vec4(1.0, 1.0, 1.0, 1.0);
+    }
+    else {
+        light.lightDiffuse = glm::vec4(0.0, 0.0, 0.0, 1.0);
+        light.lightSpecular = glm::vec4(0.0, 0.0, 0.0, 1.0);
+    }
 }
 // ================================================= ↑ВСПОМОГАТЕЛЬНЫЕ ПРИКОЛЮХИ↑ =================================================
 //================================================================================================================================
@@ -698,6 +711,7 @@ int main() {
                 case (sf::Keyboard::A): moveLightDirection(-0.01f, 0, 0); break;
                 case (sf::Keyboard::E): moveLightDirection(0, 0, 0.01f); break;
                 case (sf::Keyboard::Q): moveLightDirection(0, 0, -0.01f); break;
+                case (sf::Keyboard::O): switchLight(); break;
                 default: break; 
                 }
             }
