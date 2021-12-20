@@ -40,13 +40,20 @@ struct ShaderInformation {
     GLint unifLightAmbient;
     GLint unifLightDiffuse;
     GLint unifLightSpecular;
-    GLint unifLightAttenuation;
 
     GLint unifMaterialAmbient;
     GLint unifMaterialDiffuse;
     GLint unifMaterialSpecular;
     GLint unifMaterialEmission;
     GLint unifMaterialShininess;
+
+    GLint unifLeftSpotPosition;
+    GLint unifRightSpotPosition;
+    GLint unifSpotDirection;
+    GLint unifSpotAttenuation;
+    GLint unifSpotLight;
+    GLint unifSpotCutoff;
+    GLint unifSpotExponent;
 };
 
 struct Light {
@@ -54,6 +61,16 @@ struct Light {
    glm::vec4 lightAmbient;
    glm::vec4 lightDiffuse;
    glm::vec4 lightSpecular;
+};
+
+struct SpotLight {
+    glm::vec4 leftSpotPosition;
+    glm::vec4 rightSpotPosition;
+    glm::vec3 spotDirection;
+    glm::vec3 spotAttenuation;
+    glm::vec4 spotLight;
+    GLfloat spotCutoff;
+    GLfloat spotExponent;
 };
 
 struct Material {
@@ -86,6 +103,7 @@ std::vector <GameObject> road;
 std::vector <GameObject> grass;
 
 Light light;
+SpotLight spot;
 bool isLightOn = true;
 
 glm::vec3 cameraPosition = glm::vec3(0.0f, -15.0f, -35.0f);
@@ -154,6 +172,9 @@ const char* VertexShaderSource = TO_STRING(
 
     uniform vec3 cameraPosition;   
 
+    uniform vec4 leftSpotPosition;
+    uniform vec4 rightSpotPosition;
+
     in vec3 vertexPosition;
     in vec3 vertexNormale;
     in vec2 vertexTextureCoords;
@@ -161,10 +182,23 @@ const char* VertexShaderSource = TO_STRING(
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
     out vec3 viewDirection;
+    out vec3 leftSpotLightDirection;
+    out vec3 rightSpotLightDirection;
+    out float leftSpotDistance;
+    out float rightSpotDistance;
 
     void main() {
         // Переведём координаты в мировые
         vec4 worldVertexPosition = modelMatrix * vec4(vertexPosition, 1.0);
+        // Находим вектор освещения для фар
+        vec4 leftSpotLightDir = leftSpotPosition - worldVertexPosition;
+        vec4 rightSpotLightDir = rightSpotPosition - worldVertexPosition;
+        // Задаём расстояние от фар
+        leftSpotDistance = length(leftSpotLightDir);
+        rightSpotDistance = length(rightSpotLightDir);
+        //Пробрасываем вектора на фары
+        leftSpotLightDirection = normalize(vec3(leftSpotLightDir));
+        rightSpotLightDirection = normalize(vec3(rightSpotLightDir));
         // Пробрасываем текстурные
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
         // Преобразуем и пробрасываем нормаль
@@ -185,6 +219,12 @@ const char* FragShaderSource = TO_STRING(
     uniform vec4 lightDiffuse;
     uniform vec4 lightSpecular;
 
+    uniform vec3 spotDirection;
+    uniform vec3 spotAttenuation;
+    uniform vec4 spotLight;
+    uniform float spotCutoff;
+    uniform float spotExponent;
+
     uniform sampler2D textureData;
     uniform vec4 materialAmbient;
     uniform vec4 materialDiffuse;
@@ -195,23 +235,47 @@ const char* FragShaderSource = TO_STRING(
     in vec2 vTextureCoordinate;
     in vec3 vNormale;
     in vec3 viewDirection;
+    in vec3 leftSpotLightDirection;
+    in vec3 rightSpotLightDirection;
+    in float leftSpotDistance;
+    in float rightSpotDistance;
 
     out vec4 color;
 
     void main() {
+        // Угол отклонения от направления фар
+        float leftSpotEffect = dot(leftSpotLightDirection, normalize(-spotDirection));
+        float rightSpotEffect = dot(normalize(spotDirection), -rightSpotLightDirection);
+        // Ограничение зоны прожекторов (фар)
+        float leftSpot = float(leftSpotEffect > spotCutoff);
+        float rightSpot = float(rightSpotEffect > spotCutoff);
+        // Затухание к краям сектора фар
+        leftSpotEffect = max(0.0,pow(leftSpotEffect,spotExponent));
+        rightSpotEffect = max(0.0, pow(rightSpotEffect, spotExponent));
+        // Коэффициент затухания
+        float leftAttenuation = leftSpot * leftSpotEffect / (spotAttenuation[0] + spotAttenuation[1] * leftSpotDistance + spotAttenuation[2] * leftSpotDistance * leftSpotDistance);
+        float rightAttenuation = rightSpot * rightSpotEffect / (spotAttenuation[0] + spotAttenuation[1] * rightSpotDistance + spotAttenuation[2] * rightSpotDistance * rightSpotDistance);
+
         // Собственное свечение объекта
         color = materialEmission;
         // Вкладываем эмбиент
         color += materialAmbient * lightAmbient;
         // Считаем диффузное освещение через скаляр векторов
         float lightAngle = max(dot(vNormale, lightDirection), 0.0);
+        float leftSpotAngle = max(dot(vNormale, leftSpotLightDirection), 0.0);
+        float rightSpotAngle = max(dot(vNormale, rightSpotLightDirection), 0.0);
         color += materialDiffuse * lightDiffuse * lightAngle;
+        color += materialDiffuse * spotLight * leftSpotAngle * leftAttenuation;
+        color += materialDiffuse * spotLight * rightSpotAngle * rightAttenuation;
         // Считаем блики той самой формулой
         float specularAngle = max(pow(dot(reflect(-lightDirection, vNormale), viewDirection), materialShininess), 0.0);
         color += materialSpecular * lightSpecular * specularAngle;
         // Смешиваем полученное с текстурой
         color *= texture(textureData, vTextureCoordinate);
         //color = texture(textureData, vTextureCoordinate)  + vec4(vNormale, 1.0) * 0.0001;
+        if (leftSpot < 0.0001f && rightSpot < 0.0001f) {
+            //color = vec4(1.0,0.0,0.0,1.0);
+        }
     }
 );
 
@@ -417,13 +481,13 @@ void InitShader() {
     GLuint vShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vShader, 1, &VertexShaderSource, NULL);
     glCompileShader(vShader);
-    std::cout << "vertex shader \n";
+    std::cout << "Vertex shader has been compiled." << std::endl;
     ShaderLog(vShader);
 
     GLuint fShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fShader, 1, &FragShaderSource, NULL);
     glCompileShader(fShader);
-    std::cout << "fragment shader \n";
+    std::cout << "Fragment shader has been compiled." << std::endl;
     ShaderLog(fShader);
 
     shaderInformation.shaderProgram = glCreateProgram();
@@ -569,6 +633,55 @@ void InitShader() {
         return;
     }
 
+    shaderInformation.unifLeftSpotPosition = glGetUniformLocation(shaderInformation.shaderProgram, "leftSpotPosition");
+    if (shaderInformation.unifLeftSpotPosition == -1)
+    {
+        std::cout << "could not bind uniform unifLeftSpotPosition" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifRightSpotPosition = glGetUniformLocation(shaderInformation.shaderProgram, "rightSpotPosition");
+    if (shaderInformation.unifRightSpotPosition == -1)
+    {
+        std::cout << "could not bind uniform unifRightSpotPosition" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotAttenuation = glGetUniformLocation(shaderInformation.shaderProgram, "spotAttenuation");
+    if (shaderInformation.unifSpotAttenuation == -1)
+    {
+        std::cout << "could not bind uniform unifSpotAttenuation" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotCutoff = glGetUniformLocation(shaderInformation.shaderProgram, "spotCutoff");
+    if (shaderInformation.unifSpotCutoff == -1)
+    {
+        std::cout << "could not bind uniform unifSpotCutoff" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotDirection = glGetUniformLocation(shaderInformation.shaderProgram, "spotDirection");
+    if (shaderInformation.unifSpotDirection == -1)
+    {
+        std::cout << "could not bind uniform unifSpotDirection" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotExponent = glGetUniformLocation(shaderInformation.shaderProgram, "spotExponent");
+    if (shaderInformation.unifSpotExponent == -1)
+    {
+        std::cout << "could not bind uniform unifSpotExponent" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotLight = glGetUniformLocation(shaderInformation.shaderProgram, "spotLight");
+    if (shaderInformation.unifSpotLight == -1)
+    {
+        std::cout << "could not bind uniform unifSpotLight" << std::endl;
+        return;
+    }
+    std::cout << "All uniforms are binded." << std::endl;
     checkOpenGLerror();
 }
 
@@ -585,6 +698,18 @@ void initLight() {
         glm::vec4(1.0, 1.0, 1.0, 1.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0)
+    };
+    spot = SpotLight{
+        //glm::vec4(-2.0f,1.73f,-7.3f,0.0f),    //leftSpotPosition
+        //glm::vec4(2.0f,1.73f,-7.3f,0.0f),     //rightSpotPosition
+        glm::vec4(10.0f,30.0f,0.0f,1.0f),
+        glm::vec4(-10.0f,30.0f,0.0f,1.0f),
+        //glm::vec3(0.0f,-0.5f,-1.0f),          //spotDirection
+        glm::vec3(0.0f,-1.0f,0.0f),             
+        glm::vec3(1.0f,1.0f,1.0f),              //spotAttenuation
+        glm::vec4(1.0f,1.0f,1.0f,1.0f),         //spotLight
+        glm::cos(glm::radians(30.0f)),                    //spotCutoff
+        2.0f                                    //spotExponent
     };
 }
 
@@ -624,21 +749,33 @@ void GameTick(int tick) {
 
 void Draw(GameObject gameObject) {
     glUseProgram(shaderInformation.shaderProgram);
+
     glUniformMatrix4fv(shaderInformation.unifModel, 1, GL_FALSE, glm::value_ptr(gameObject.modelMatrix));
     glUniformMatrix4fv(shaderInformation.unifView, 1, GL_FALSE, glm::value_ptr(viewMatrix));
     glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
     glUniformMatrix4fv(shaderInformation.unifnormaleRotation, 1, GL_FALSE, glm::value_ptr(gameObject.normaleRotationMatrix));
+
     glUniform3fv(shaderInformation.unifCameraPosition, 1, glm::value_ptr(cameraPosition));
     glUniform4fv(shaderInformation.unifLightAmbient, 1, glm::value_ptr(light.lightAmbient));
     glUniform4fv(shaderInformation.unifLightDiffuse, 1, glm::value_ptr(light.lightDiffuse));
     glUniform3fv(shaderInformation.unifLightDirection, 1, glm::value_ptr(light.lightDirection));
     glUniform4fv(shaderInformation.unifLightSpecular, 1, glm::value_ptr(light.lightSpecular));
+
     glUniform1f(shaderInformation.unifMaterialShininess, gameObject.material.materialshininess);
     glUniform4fv(shaderInformation.unifMaterialAmbient, 1, glm::value_ptr(gameObject.material.materialAmbient));
     glUniform4fv(shaderInformation.unifMaterialDiffuse, 1, glm::value_ptr(gameObject.material.materialDiffuse));
     glUniform4fv(shaderInformation.unifMaterialEmission, 1, glm::value_ptr(gameObject.material.materialEmission));
     glUniform4fv(shaderInformation.unifMaterialSpecular, 1, glm::value_ptr(gameObject.material.materialSpecular));
-    
+
+    glUniform4fv(shaderInformation.unifLeftSpotPosition, 1, glm::value_ptr(spot.leftSpotPosition));
+    glUniform4fv(shaderInformation.unifRightSpotPosition, 1, glm::value_ptr(spot.rightSpotPosition));
+    glUniform4fv(shaderInformation.unifSpotLight, 1, glm::value_ptr(spot.spotLight));
+    glUniform3fv(shaderInformation.unifSpotDirection, 1, glm::value_ptr(spot.spotDirection));
+    glUniform3fv(shaderInformation.unifSpotAttenuation, 1, glm::value_ptr(spot.spotAttenuation));
+    glUniform1f(shaderInformation.unifSpotCutoff, spot.spotCutoff);
+    glUniform1f(shaderInformation.unifSpotExponent, spot.spotExponent);
+
+    checkOpenGLerror();
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&gameObject.textureData);
