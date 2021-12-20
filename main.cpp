@@ -13,7 +13,9 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
+#include <deque>
+#include <random>
+#include <functional>
 
 // В C и C++ есть оператор #, который позволяет превращать параметры макроса в строку
 #define TO_STRING(x) #x
@@ -78,17 +80,42 @@ struct GameObject {
     //Всякие коэффициенты для материала
     Material material;
 };
+
+struct Hurdle : GameObject {
+    float xShift;
+    float zShift;
+    float radius;
+
+    Hurdle(GLuint buffer_size, GLuint vertexVAO, sf::Texture textureData, glm::mat4 modelMatrix, glm::mat4 normaleRotationMatrix, Material material, float zShift, float radius) {
+        this->buffer_size = buffer_size;
+        this->vertexVAO = vertexVAO;
+        this->textureData = textureData;
+        this->modelMatrix = modelMatrix;
+        this->normaleRotationMatrix = normaleRotationMatrix;
+        this->material = material;
+        this->zShift = zShift;
+        this->radius = radius;
+    }
+
+    Hurdle(){}
+};
 // ========================================================= ↑СТРУКТУРЫ↑ ==========================================================
 //================================================================================================================================
 // ================================================= ↓ОБЪЯВЛЕНИЕ ВСЯКОГО РАЗНОГО↓ =================================================
 GameObject car;
 std::vector <GameObject> road;
 std::vector <GameObject> grass;
+Hurdle moose;
+Hurdle cone;
+std::deque<Hurdle> currentHurdles;
 
 Light light;
 bool isLightOn = true;
 
 glm::vec3 cameraPosition = glm::vec3(0.0f, -15.0f, -35.0f);
+
+std::default_random_engine generator;
+std::uniform_int_distribution<int> distribution(1, 6);
 
 int carYawState = 0;
 float carYawAngle = 0.0f;
@@ -374,6 +401,53 @@ GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 
     };
 }
 
+Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material) {
+    GLuint VAO;
+    GLuint VBO;
+    auto vertices = parseFile(objFile);
+    sf::Texture textureData;
+    loadTexture(textureData, textureFile);
+
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+
+    VBOArray.push_back(VAO);
+    VBOArray.push_back(VBO);
+
+    glBindVertexArray(VAO);
+
+    glEnableVertexAttribArray(shaderInformation.attribVertex);
+    glEnableVertexAttribArray(shaderInformation.attribNormale);
+    glEnableVertexAttribArray(shaderInformation.attribTexture);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW);
+
+    // Атрибут с координатами
+    glVertexAttribPointer(shaderInformation.attribVertex, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)0);
+    // Атрибут с цветом
+    glVertexAttribPointer(shaderInformation.attribNormale, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
+    // Атрибут с текстурой
+    glVertexAttribPointer(shaderInformation.attribTexture, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*)(6 * sizeof(GLfloat)));
+
+    glBindVertexArray(0);
+    glDisableVertexAttribArray(shaderInformation.attribVertex);
+    glDisableVertexAttribArray(shaderInformation.attribNormale);
+    glDisableVertexAttribArray(shaderInformation.attribTexture);
+    checkOpenGLerror();
+    
+    return Hurdle{
+                vertices.size(),
+                VAO,
+                textureData,
+                modelMatrix,
+                normaleRotationMatrix,
+                material,
+                0.0f,
+                0.0f
+    };
+}
+
 void InitObjects()
 {
     Material carMaterial = Material{
@@ -410,6 +484,8 @@ void InitObjects()
         grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
     }
     car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
+    moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
+    cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
 }
 
 
@@ -599,6 +675,32 @@ void Init() {
 // ========================================================= ↓ОТРИСОВКА↓ =========================================================
 // Обработка шага игрового цикла
 void GameTick(int tick) {
+    if (tick % 50 == 0) {
+        auto x = distribution(generator);
+        if (x == 2) {
+            Hurdle hurdle = moose;
+            int shift = (distribution(generator) / 3) - 1;
+            hurdle.xShift = shift * 10.0f;
+            hurdle.zShift = -300.0f;
+            hurdle.modelMatrix = glm::translate(identityMatrix, glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift));
+            currentHurdles.push_back(hurdle);
+        }
+        if (x == 4) {
+            Hurdle hurdle = cone;
+            int shift = (distribution(generator) / 3) - 1;
+            hurdle.xShift = shift * 10.0f;
+            hurdle.zShift = -300.0f;
+            hurdle.modelMatrix = glm::translate(identityMatrix, glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift));
+            currentHurdles.push_back(hurdle);
+        }
+    }
+    for (auto& hurdle : currentHurdles) {
+        hurdle.zShift += 1.0f;
+        hurdle.modelMatrix = glm::translate(identityMatrix, glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift));
+    }
+    if (!currentHurdles.empty() && currentHurdles.front().zShift > 20) {
+        currentHurdles.pop_front();
+    }
     for (int i = 0; i < 3; ++i) {
         road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
         grass[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
@@ -689,6 +791,11 @@ int main() {
     glClearColor(0.0f, 0.0f, 0.2f, 1.0f);
     // Счётчик кадров
     int tickCounter = 0;
+
+   
+    int dice_roll = distribution(generator);
+    auto dice = std::bind(distribution, generator);
+
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
@@ -727,7 +834,12 @@ int main() {
         for (GameObject& object : grass)
             Draw(object);
 
+        for (Hurdle& hurdle : currentHurdles)
+            Draw(hurdle);
+
         Draw(car);
+
+
         int x = 1;
         if (carYawAngle > 10) {
            x = 1;
