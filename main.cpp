@@ -105,6 +105,8 @@ struct Hurdle : GameObject {
 GameObject car;
 std::vector <GameObject> road;
 std::vector <GameObject> grass;
+std::vector <GameObject> leftlights;
+std::vector <GameObject> rightlights;
 Hurdle moose;
 Hurdle cone;
 std::deque<Hurdle> currentHurdles;
@@ -356,10 +358,9 @@ void ShaderLog(unsigned int shader)
 // =========================================================== ↑ЛОГИ↑ ============================================================
 //================================================================================================================================
 // ======================================================= ↓ИНИЦИАЛИЗАЦИЯ↓ =======================================================
-GameObject createObject(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material) {
+GameObject createObject(std::vector<GLfloat> vertices, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material) {
     GLuint VAO;
     GLuint VBO;
-    auto vertices = parseFile(objFile);
     sf::Texture textureData;
     loadTexture(textureData, textureFile);
 
@@ -474,16 +475,37 @@ void InitObjects()
     1.0f,
     };
 
+    Material lightMaterial = Material{
+    glm::vec4(0.0,0.0,0.0,1.0),     //Ambient
+    glm::vec4(0.0,0.0,0.0,1.0),     //Diffuse
+    glm::vec4(0.0,0.0,0.0,1.0),     //Specular
+    glm::vec4(1.0,1.0,1.0,1.0),     //Emission
+    1.0f,                          //shininess
+    };
+
+    auto roadVerts = parseFile(".\\objects\\road.obj");
     for (int i = 0; i < 3; i++) {
-        road.push_back(createObject(".\\objects\\road.obj", ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, asphaltMaterial));
+        road.push_back(createObject(roadVerts, ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, asphaltMaterial));
     }
+
+    auto grassVerts = parseFile(".\\objects\\bettergrass.obj");
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
+        grass.push_back(createObject(grassVerts, ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
     }
+
     for (int i = 0; i < 3; i++) {
-        grass.push_back(createObject(".\\objects\\bettergrass.obj", ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
+        grass.push_back(createObject(grassVerts, ".\\objects\\field2.png", glm::translate(identityMatrix, glm::vec3(-100.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, grassMaterial));
     }
-    car = createObject(".\\objects\\bus2.obj", ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
+    
+    auto lightVerts = parseFile(".\\objects\\light.obj");
+    for (int i = 0; i < 3; i++) {
+        for (int i = 0; i <= 9; i++) {
+            rightlights.push_back(createObject(lightVerts, (".\\objects\\light" + std::to_string(i) + ".png").c_str(), glm::translate(identityMatrix, glm::vec3(15.0f, 5.0f, 50 - 20.0f * (i-1))), identityMatrix, lightMaterial));
+            leftlights.push_back(createObject(lightVerts, (".\\objects\\light" + std::to_string(i) + ".png").c_str(), glm::translate(identityMatrix, glm::vec3(15.0f, 5.0f, 50 - 20.0f * (i - 1))), identityMatrix, lightMaterial));
+        }
+    }
+    
+    car = createObject(parseFile(".\\objects\\bus2.obj"), ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
     moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
     cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
 }
@@ -705,6 +727,10 @@ void GameTick(int tick) {
         road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
         grass[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(100.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
         grass[i+3].modelMatrix = glm::translate(identityMatrix, glm::vec3(-110.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
+        for (int j = 0; j < 10; j++) {
+            rightlights[i*10 + j].modelMatrix = glm::translate(identityMatrix, glm::vec3(15.0f, 5.0f, (tick % 200)  - 200.0f * i + 50.0f - j * 20.0f));
+            leftlights[i * 10 + j].modelMatrix = glm::translate(identityMatrix, glm::vec3(-15.0f, 5.0f, (tick % 200) - 200.0f * i + 50.0f - j * 20.0f));
+        }
     }
     if (carYawState != 0) {
         carYawAngle = clamp(carYawAngle - carYawState, -15.0f, 15.0f);
@@ -830,6 +856,11 @@ int main() {
         // Отрисовываем все объекты сцены
         for (GameObject& object : road)
             Draw(object);
+
+        for (GameObject& light : leftlights)
+            Draw(light);
+        for (GameObject& light : rightlights)
+            Draw(light);
 
         for (GameObject& object : grass)
             Draw(object);
