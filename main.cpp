@@ -44,6 +44,12 @@ struct ShaderInformation {
     GLint unifLightSpecular;
     GLint unifLightAttenuation;
 
+    GLint unifSpotPosition;
+    GLint unifSpotDirection;
+    GLint unifSpotLight;
+    GLint unifSpotAttenuation;
+    GLint unifSpotCutOffCos;
+
     GLint unifMaterialAmbient;
     GLint unifMaterialDiffuse;
     GLint unifMaterialSpecular;
@@ -56,6 +62,14 @@ struct Light {
    glm::vec4 lightAmbient;
    glm::vec4 lightDiffuse;
    glm::vec4 lightSpecular;
+};
+
+struct SpotLight {
+    glm::vec3 position;
+    glm::vec3 direction;
+    GLfloat cutOffCos;
+    glm::vec3 attenuation;
+    glm::vec3 light;
 };
 
 struct Material {
@@ -112,6 +126,7 @@ Hurdle moose;
 Hurdle cone;
 std::deque<Hurdle> currentHurdles;
 
+SpotLight spotLight;
 Light light;
 bool isLightOn = true;
 int lightEmergencyModeTime = 0;
@@ -186,6 +201,8 @@ const char* VertexShaderSource = TO_STRING(
 
     uniform vec3 cameraPosition;   
 
+    uniform vec3 spotPosition;
+
     in vec3 vertexPosition;
     in vec3 vertexNormale;
     in vec2 vertexTextureCoords;
@@ -193,6 +210,8 @@ const char* VertexShaderSource = TO_STRING(
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
     out vec3 viewDirection;
+    out vec3 spotLightDirection;
+    out float spotDistance;
 
     void main() {
         // Переведём координаты в мировые
@@ -206,6 +225,8 @@ const char* VertexShaderSource = TO_STRING(
         gl_Position = projectionMatrix * viewMatrix * worldVertexPosition;
         // Пробрасываем вектор в глаз
         viewDirection = normalize(cameraPosition - vec3(worldVertexPosition));
+        spotLightDirection = normalize(spotPosition - vec3(worldVertexPosition));
+        spotDistance = length(spotPosition - vec3(worldVertexPosition));
     }
 );
 
@@ -217,6 +238,11 @@ const char* FragShaderSource = TO_STRING(
     uniform vec4 lightDiffuse;
     uniform vec4 lightSpecular;
 
+    uniform vec3 spotDirection;
+    uniform vec3 spotLight;
+    uniform vec3 spotAttenuation;
+    uniform float spotCutOffCos;
+
     uniform sampler2D textureData;
     uniform vec4 materialAmbient;
     uniform vec4 materialDiffuse;
@@ -227,10 +253,14 @@ const char* FragShaderSource = TO_STRING(
     in vec2 vTextureCoordinate;
     in vec3 vNormale;
     in vec3 viewDirection;
+    in vec3 spotLightDirection;
+    in float spotDistance;
 
     out vec4 color;
 
     void main() {
+        float spotAngle = dot(spotLightDirection,normalize(-spotDirection));
+        float attenuation = 1.0 / (spotAttenuation[0] + spotAttenuation[1] * spotDistance + spotAttenuation[2] * spotDistance * spotDistance);
         // Собственное свечение объекта
         color = materialEmission;
         // Вкладываем эмбиент
@@ -238,12 +268,18 @@ const char* FragShaderSource = TO_STRING(
         // Считаем диффузное освещение через скаляр векторов
         float lightAngle = max(dot(vNormale, lightDirection), 0.0);
         color += materialDiffuse * lightDiffuse * lightAngle;
+        if (spotAngle > spotCutOffCos) {
+            float spotLightAngle = max(dot(vNormale, spotLightDirection), 0.0);
+            color += materialDiffuse * vec4(spotLight,1.0) * spotLightAngle * attenuation;
+        }
         // Считаем блики той самой формулой
         float specularAngle = max(pow(dot(reflect(-lightDirection, vNormale), viewDirection), materialShininess), 0.0);
         color += materialSpecular * lightSpecular * specularAngle;
         // Смешиваем полученное с текстурой
         color *= texture(textureData, vTextureCoordinate);
-        //color = texture(textureData, vTextureCoordinate)  + vec4(vNormale, 1.0) * 0.0001;
+        if (spotAngle < spotCutOffCos) {
+            color = vec4(1.0, 0.0, 0.0, 1.0);
+        }
     }
 );
 
@@ -670,6 +706,41 @@ void InitShader() {
         return;
     }
 
+    shaderInformation.unifSpotAttenuation = glGetUniformLocation(shaderInformation.shaderProgram, "spotAttenuation");
+    if (shaderInformation.unifSpotAttenuation == -1)
+    {
+        std::cout << "could not bind uniform unifSpotAttenuation" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotDirection = glGetUniformLocation(shaderInformation.shaderProgram, "spotDirection");
+    if (shaderInformation.unifSpotDirection == -1)
+    {
+        std::cout << "could not bind uniform " << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotLight = glGetUniformLocation(shaderInformation.shaderProgram, "spotLight");
+    if (shaderInformation.unifSpotLight == -1)
+    {
+        std::cout << "could not bind uniform unifSpotLight" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotPosition = glGetUniformLocation(shaderInformation.shaderProgram, "spotPosition");
+    if (shaderInformation.unifSpotPosition == -1)
+    {
+        std::cout << "could not bind uniform unifSpotPosition" << std::endl;
+        return;
+    }
+
+    shaderInformation.unifSpotCutOffCos = glGetUniformLocation(shaderInformation.shaderProgram, "spotCutOffCos");
+    if (shaderInformation.unifSpotCutOffCos == -1)
+    {
+        std::cout << "could not bind uniform unifSpotCutOffCos" << std::endl;
+        return;
+    }
+
     checkOpenGLerror();
 }
 
@@ -686,6 +757,13 @@ void initLight() {
         glm::vec4(1.0, 1.0, 1.0, 1.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0),
         glm::vec4(1.0, 1.0, 1.0, 1.0)
+    };
+    spotLight = SpotLight{
+        glm::vec3(0.0,5.0,0.0),
+        glm::vec3(0.0,-1.0,0.0),
+        glm::cos(glm::radians(10.0f)),
+        glm::vec3(1.0,0.09,0.032),
+        glm::vec3(1.0,1.0,1.0)
     };
 }
 
@@ -792,16 +870,23 @@ void Draw(GameObject gameObject) {
     glUniformMatrix4fv(shaderInformation.unifProjection, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
     glUniformMatrix4fv(shaderInformation.unifnormaleRotation, 1, GL_FALSE, glm::value_ptr(gameObject.normaleRotationMatrix));
     glUniform3fv(shaderInformation.unifCameraPosition, 1, glm::value_ptr(cameraPosition));
+
     glUniform4fv(shaderInformation.unifLightAmbient, 1, glm::value_ptr(light.lightAmbient));
     glUniform4fv(shaderInformation.unifLightDiffuse, 1, glm::value_ptr(light.lightDiffuse));
     glUniform3fv(shaderInformation.unifLightDirection, 1, glm::value_ptr(light.lightDirection));
     glUniform4fv(shaderInformation.unifLightSpecular, 1, glm::value_ptr(light.lightSpecular));
+
     glUniform1f(shaderInformation.unifMaterialShininess, gameObject.material.materialshininess);
     glUniform4fv(shaderInformation.unifMaterialAmbient, 1, glm::value_ptr(gameObject.material.materialAmbient));
     glUniform4fv(shaderInformation.unifMaterialDiffuse, 1, glm::value_ptr(gameObject.material.materialDiffuse));
     glUniform4fv(shaderInformation.unifMaterialEmission, 1, glm::value_ptr(gameObject.material.materialEmission));
     glUniform4fv(shaderInformation.unifMaterialSpecular, 1, glm::value_ptr(gameObject.material.materialSpecular));
-    
+
+    glUniform1f(shaderInformation.unifSpotCutOffCos, spotLight.cutOffCos);
+    glUniform3fv(shaderInformation.unifSpotAttenuation, 1, glm::value_ptr(spotLight.attenuation));
+    glUniform3fv(shaderInformation.unifSpotDirection, 1, glm::value_ptr(spotLight.direction));
+    glUniform3fv(shaderInformation.unifSpotLight, 1, glm::value_ptr(spotLight.light));
+    glUniform3fv(shaderInformation.unifSpotPosition, 1, glm::value_ptr(spotLight.position));
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&gameObject.textureData);
