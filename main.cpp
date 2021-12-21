@@ -107,6 +107,7 @@ std::vector <GameObject> road;
 std::vector <GameObject> grass;
 std::vector <GameObject> leftlights;
 std::vector <GameObject> rightlights;
+GameObject background;
 Hurdle moose;
 Hurdle cone;
 std::deque<Hurdle> currentHurdles;
@@ -504,7 +505,7 @@ void InitObjects()
             leftlights.push_back(createObject(lightVerts, (".\\objects\\light" + std::to_string(i) + ".png").c_str(), glm::translate(identityMatrix, glm::vec3(15.0f, 5.0f, 50 - 20.0f * (i - 1))), identityMatrix, lightMaterial));
         }
     }
-    
+    background = createObject(parseFile(".\\objects\\background.obj"), ".\\objects\\background.png", glm::translate(identityMatrix, glm::vec3(0.0f, -10.0f, -199.0f)), identityMatrix, lightMaterial);
     car = createObject(parseFile(".\\objects\\bus2.obj"), ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
     moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
     cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
@@ -869,6 +870,7 @@ int main() {
             Draw(hurdle);
 
         Draw(car);
+        Draw(background);
 
 
         int x = 1;
