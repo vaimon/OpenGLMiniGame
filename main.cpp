@@ -114,6 +114,7 @@ std::deque<Hurdle> currentHurdles;
 
 Light light;
 bool isLightOn = true;
+int lightEmergencyModeTime = 0;
 
 glm::vec3 cameraPosition = glm::vec3(0.0f, -15.0f, -35.0f);
 
@@ -123,6 +124,7 @@ std::uniform_int_distribution<int> distribution(1, 6);
 int carYawState = 0;
 float carYawAngle = 0.0f;
 float carYawPosition = 0.0f;
+const float carRadius = 3.0f;
 
 glm::mat4 viewMatrix;
 glm::mat4 projectionMatrix;
@@ -403,7 +405,7 @@ GameObject createObject(std::vector<GLfloat> vertices, const char* textureFile, 
     };
 }
 
-Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material) {
+Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material, float radius) {
     GLuint VAO;
     GLuint VBO;
     auto vertices = parseFile(objFile);
@@ -446,7 +448,7 @@ Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 mode
                 normaleRotationMatrix,
                 material,
                 0.0f,
-                0.0f
+                radius
     };
 }
 
@@ -507,8 +509,8 @@ void InitObjects()
     }
     background = createObject(parseFile(".\\objects\\background.obj"), ".\\objects\\background.png", glm::translate(identityMatrix, glm::vec3(0.0f, -10.0f, -199.0f)), identityMatrix, lightMaterial);
     car = createObject(parseFile(".\\objects\\bus2.obj"), ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
-    moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
-    cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
+    moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial, 3.0f);
+    cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial, 1.0f);
 }
 
 
@@ -696,11 +698,36 @@ void Init() {
 // ======================================================= ↑ИНИЦИАЛИЗАЦИЯ↑ =======================================================
 //================================================================================================================================
 // ========================================================= ↓ОТРИСОВКА↓ =========================================================
+
+void enableEmergencyMode() {
+    currentHurdles.clear();
+    carYawAngle = 0.0;
+    carYawPosition = 0.0;
+    lightEmergencyModeTime = 100;
+    background.material.materialEmission = glm::vec4(1.0, 0.0, 0.0, 1.0);
+    light.lightDiffuse = glm::vec4(1.0, 0.0, 0.0, 1.0);
+    light.lightSpecular = glm::vec4(1.0, 0.0, 0.0, 1.0);
+}
+
+void disableEmergencyMode() {
+    lightEmergencyModeTime = 0;
+    background.material.materialEmission = glm::vec4(1.0, 1.0, 1.0, 1.0);
+    light.lightDiffuse = glm::vec4(1.0, 1.0, 1.0, 1.0);
+    light.lightSpecular = glm::vec4(1.0, 1.0, 1.0, 1.0);
+}
+
 // Обработка шага игрового цикла
 void GameTick(int tick) {
-    if (tick % 50 == 0) {
-        auto x = distribution(generator);
-        if (x == 2) {
+    if (lightEmergencyModeTime == 1) {
+        disableEmergencyMode();
+    }
+    else if (lightEmergencyModeTime > 0) {
+        lightEmergencyModeTime--;
+    }
+
+    if (tick % 100 == 0) {
+        auto dice = distribution(generator);
+        if (dice <= 2) {
             Hurdle hurdle = moose;
             int shift = (distribution(generator) / 3) - 1;
             hurdle.xShift = shift * 10.0f;
@@ -708,7 +735,7 @@ void GameTick(int tick) {
             hurdle.modelMatrix = glm::translate(identityMatrix, glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift));
             currentHurdles.push_back(hurdle);
         }
-        if (x == 4) {
+        if (dice >= 5) {
             Hurdle hurdle = cone;
             int shift = (distribution(generator) / 3) - 1;
             hurdle.xShift = shift * 10.0f;
@@ -721,8 +748,15 @@ void GameTick(int tick) {
         hurdle.zShift += 1.0f;
         hurdle.modelMatrix = glm::translate(identityMatrix, glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift));
     }
-    if (!currentHurdles.empty() && currentHurdles.front().zShift > 20) {
-        currentHurdles.pop_front();
+    if (!currentHurdles.empty()) {
+        auto hurdle = currentHurdles.front();
+        if (hurdle.zShift > 20) {
+            currentHurdles.pop_front();
+        }
+        glm::vec3 hurdleVector = glm::vec3(hurdle.xShift, 0.0f, hurdle.zShift) - glm::vec3(carYawPosition,0.0f,-5.69f);
+        if ((glm::length(hurdleVector) < (hurdle.radius + carRadius))) {
+            enableEmergencyMode();
+        }
     }
     for (int i = 0; i < 3; ++i) {
         road[i].modelMatrix = glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - i * 200.0f + (tick % 200)));
@@ -734,15 +768,15 @@ void GameTick(int tick) {
         }
     }
     if (carYawState != 0) {
-        carYawAngle = clamp(carYawAngle - carYawState, -15.0f, 15.0f);
+        carYawAngle = clamp(carYawAngle - carYawState, -10.0f, 10.0f);
         carYawPosition = clamp(carYawPosition + carYawState / 5.0f, -12.0f, 12.0f);
     }
     else {
         if (carYawAngle < 0) {
-            carYawAngle = clamp(carYawAngle + 1.0f, -15.0f, 0.0f);
+            carYawAngle = clamp(carYawAngle + 1.0f, -10.0f, 0.0f);
         }
         else {
-            carYawAngle = clamp(carYawAngle - 1.0f, 0.0f, 15.0f);
+            carYawAngle = clamp(carYawAngle - 1.0f, 0.0f, 10.0f);
         }
     }
     auto rotation = glm::rotate(identityMatrix, glm::radians(carYawAngle), glm::vec3(0.0f, 1.0f, 0.0f));
