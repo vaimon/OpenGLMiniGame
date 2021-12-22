@@ -259,7 +259,7 @@ const char* FragShaderSource = TO_STRING(
     out vec4 color;
 
     void main() {
-        float spotAngle = dot(spotLightDirection,normalize(-spotDirection));
+        float spotAngle = dot(normalize(spotLightDirection),normalize(-spotDirection));
         float attenuation = 1.0 / (spotAttenuation[0] + spotAttenuation[1] * spotDistance + spotAttenuation[2] * spotDistance * spotDistance);
         // Собственное свечение объекта
         color = materialEmission;
@@ -269,7 +269,7 @@ const char* FragShaderSource = TO_STRING(
         float lightAngle = max(dot(vNormale, lightDirection), 0.0);
         color += materialDiffuse * lightDiffuse * lightAngle;
         if (spotAngle > spotCutOffCos) {
-            float spotLightAngle = max(dot(vNormale, spotLightDirection), 0.0);
+            float spotLightAngle = max(dot(vNormale, normalize(spotLightDirection)), 0.0);
             color += materialDiffuse * vec4(spotLight,1.0) * spotLightAngle * attenuation;
         }
         // Считаем блики той самой формулой
@@ -277,9 +277,7 @@ const char* FragShaderSource = TO_STRING(
         color += materialSpecular * lightSpecular * specularAngle;
         // Смешиваем полученное с текстурой
         color *= texture(textureData, vTextureCoordinate);
-        if (spotAngle < spotCutOffCos) {
-            color = vec4(1.0, 0.0, 0.0, 1.0);
-        }
+        
     }
 );
 
@@ -761,7 +759,7 @@ void initLight() {
     spotLight = SpotLight{
         glm::vec3(0.0,5.0,0.0),
         glm::vec3(0.0,-1.0,0.0),
-        glm::cos(glm::radians(10.0f)),
+        glm::cos(glm::radians(60.0f)),
         glm::vec3(1.0,0.09,0.032),
         glm::vec3(1.0,1.0,1.0)
     };
