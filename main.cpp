@@ -122,6 +122,7 @@ std::vector <GameObject> grass;
 std::vector <GameObject> leftlights;
 std::vector <GameObject> rightlights;
 GameObject background;
+//GameObject roadpiece;
 Hurdle moose;
 Hurdle cone;
 std::deque<Hurdle> currentHurdles;
@@ -201,8 +202,6 @@ const char* VertexShaderSource = TO_STRING(
 
     uniform vec3 cameraPosition;   
 
-    uniform vec3 spotPosition;
-
     in vec3 vertexPosition;
     in vec3 vertexNormale;
     in vec2 vertexTextureCoords;
@@ -210,23 +209,21 @@ const char* VertexShaderSource = TO_STRING(
     out vec2 vTextureCoordinate;
     out vec3 vNormale;
     out vec3 viewDirection;
-    out vec3 spotLightDirection;
-    out float spotDistance;
+    out vec4 vPosition;
 
     void main() {
         // Переведём координаты в мировые
         vec4 worldVertexPosition = modelMatrix * vec4(vertexPosition, 1.0);
+        vPosition = worldVertexPosition;
         // Пробрасываем текстурные
         vTextureCoordinate = vec2(vertexTextureCoords.x, 1.0 - vertexTextureCoords.y);
         // Преобразуем и пробрасываем нормаль
         vec4 transNormale = normaleRotationMatrix * vec4(vertexNormale,0.0);
-        vNormale = normalize(vec3(transNormale));
+        vNormale = vec3(transNormale);
         // Задаём позишн
         gl_Position = projectionMatrix * viewMatrix * worldVertexPosition;
         // Пробрасываем вектор в глаз
         viewDirection = normalize(cameraPosition - vec3(worldVertexPosition));
-        spotLightDirection = normalize(spotPosition - vec3(worldVertexPosition));
-        spotDistance = length(spotPosition - vec3(worldVertexPosition));
     }
 );
 
@@ -242,6 +239,7 @@ const char* FragShaderSource = TO_STRING(
     uniform vec3 spotLight;
     uniform vec3 spotAttenuation;
     uniform float spotCutOffCos;
+    uniform vec3 spotPosition;
 
     uniform sampler2D textureData;
     uniform vec4 materialAmbient;
@@ -253,12 +251,13 @@ const char* FragShaderSource = TO_STRING(
     in vec2 vTextureCoordinate;
     in vec3 vNormale;
     in vec3 viewDirection;
-    in vec3 spotLightDirection;
-    in float spotDistance;
+    in vec4 vPosition;
 
     out vec4 color;
 
     void main() {
+        vec3 spotLightDirection = normalize(spotPosition - vec3(vPosition));
+        float spotDistance = length(spotPosition - vec3(vPosition));
         float spotAngle = dot(normalize(spotLightDirection),normalize(-spotDirection));
         float attenuation = 1.0 / (spotAttenuation[0] + spotAttenuation[1] * spotDistance + spotAttenuation[2] * spotDistance * spotDistance);
         // Собственное свечение объекта
@@ -277,7 +276,6 @@ const char* FragShaderSource = TO_STRING(
         color += materialSpecular * lightSpecular * specularAngle;
         // Смешиваем полученное с текстурой
         color *= texture(textureData, vTextureCoordinate);
-        
     }
 );
 
@@ -522,7 +520,7 @@ void InitObjects()
 
     auto roadVerts = parseFile(".\\objects\\road.obj");
     for (int i = 0; i < 3; i++) {
-        road.push_back(createObject(roadVerts, ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, asphaltMaterial));
+        road.push_back(createObject(roadVerts, ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, -50.0f - 200.0f * i)), identityMatrix, carMaterial));
     }
 
     auto grassVerts = parseFile(".\\objects\\bettergrass.obj");
@@ -545,6 +543,7 @@ void InitObjects()
     car = createObject(parseFile(".\\objects\\bus2.obj"), ".\\objects\\bus2.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial);
     moose = createHurdle(".\\objects\\los.obj", ".\\objects\\los.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial, 3.0f);
     cone = createHurdle(".\\objects\\cone.obj", ".\\objects\\cone.png", glm::translate(identityMatrix, glm::vec3(0.0f, 0.0f, 0.0f)), identityMatrix, carMaterial, 1.0f);
+    //roadpiece = createObject(parseFile(".\\objects\\road2.obj"), ".\\objects\\road.png", glm::translate(identityMatrix, glm::vec3(0.0f, 5.0f, 0.0f)), identityMatrix, carMaterial);
 }
 
 
@@ -757,10 +756,10 @@ void initLight() {
         glm::vec4(1.0, 1.0, 1.0, 1.0)
     };
     spotLight = SpotLight{
-        glm::vec3(0.0,10.0,0.0),
-        glm::vec3(0.0,-1.0,0.0),
-        glm::cos(glm::radians(60.0f)),
-        glm::vec3(1.0,0.09,0.032),
+        glm::vec3(0.0,3.0,-7.0),
+        glm::vec3(0.0,-0.2,-1.0),
+        glm::cos(glm::radians(30.0f)),
+        glm::vec3(1.0,0.0,0.0),
         glm::vec3(1.0,1.0,1.0)
     };
 }
@@ -791,6 +790,9 @@ void disableEmergencyMode() {
     light.lightDiffuse = glm::vec4(1.0, 1.0, 1.0, 1.0);
     light.lightSpecular = glm::vec4(1.0, 1.0, 1.0, 1.0);
 }
+
+glm::vec4 updatedPosition;
+glm::vec3 rotatedVector;
 
 // Обработка шага игрового цикла
 void GameTick(int tick) {
@@ -858,6 +860,10 @@ void GameTick(int tick) {
     auto rotation = glm::rotate(identityMatrix, glm::radians(carYawAngle), glm::vec3(0.0f, 1.0f, 0.0f));
     car.modelMatrix = glm::translate(rotation, glm::vec3(carYawPosition, 1.0f, 0.0f));
     car.normaleRotationMatrix = glm::transpose(glm::inverse(rotation));
+    updatedPosition = glm::translate(identityMatrix, glm::vec3(carYawPosition, 1.0f, 0.0f)) * glm::vec4(spotLight.position, 1.0);
+    rotatedVector = car.normaleRotationMatrix * glm::vec4(spotLight.direction, 1.0);
+
+    //spotLight.direction = glm::transpose(glm::inverse(rotation)) * glm::vec4(spotLight.direction, 0.0);
 }
 
 
@@ -882,9 +888,9 @@ void Draw(GameObject gameObject) {
 
     glUniform1f(shaderInformation.unifSpotCutOffCos, spotLight.cutOffCos);
     glUniform3fv(shaderInformation.unifSpotAttenuation, 1, glm::value_ptr(spotLight.attenuation));
-    glUniform3fv(shaderInformation.unifSpotDirection, 1, glm::value_ptr(spotLight.direction));
+    glUniform3fv(shaderInformation.unifSpotDirection, 1, glm::value_ptr(rotatedVector));
     glUniform3fv(shaderInformation.unifSpotLight, 1, glm::value_ptr(spotLight.light));
-    glUniform3fv(shaderInformation.unifSpotPosition, 1, glm::value_ptr(spotLight.position));
+    glUniform3fv(shaderInformation.unifSpotPosition, 1, glm::value_ptr(updatedPosition));
 
     glActiveTexture(GL_TEXTURE0);
     sf::Texture::bind(&gameObject.textureData);
@@ -988,7 +994,7 @@ int main() {
 
         Draw(car);
         Draw(background);
-
+        //Draw(roadpiece);
 
         int x = 1;
         if (carYawAngle > 10) {
