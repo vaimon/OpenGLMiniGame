@@ -439,7 +439,7 @@ GameObject createObject(std::vector<GLfloat> vertices, const char* textureFile, 
     };
 }
 
-Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat3 normaleRotationMatrix, Material material, float radius) {
+Hurdle createHurdle(const char* objFile, const char* textureFile, glm::mat4 modelMatrix, glm::mat4 normaleRotationMatrix, Material material, float radius) {
     GLuint VAO;
     GLuint VBO;
     auto vertices = parseFile(objFile);
@@ -757,7 +757,7 @@ void initLight() {
         glm::vec4(1.0, 1.0, 1.0, 1.0)
     };
     spotLight = SpotLight{
-        glm::vec3(0.0,5.0,0.0),
+        glm::vec3(0.0,10.0,0.0),
         glm::vec3(0.0,-1.0,0.0),
         glm::cos(glm::radians(60.0f)),
         glm::vec3(1.0,0.09,0.032),
